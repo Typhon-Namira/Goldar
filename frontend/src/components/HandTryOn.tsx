@@ -72,19 +72,73 @@ export default function HandTryOn({product}:{product:Product}){
    camera.position.set(0,0,20);camera.lookAt(0,0,0);
    const anchor=new THREE.Group();scene.add(anchor);
    const model=loaded.scene;
-   const bounds=new THREE.Box3().setFromObject(model);
-   const size=new THREE.Vector3();bounds.getSize(size);
-   const center=new THREE.Vector3();bounds.getCenter(center);
-   // Center the asset in its own pivot, not in the rotated parent.
+   // Calibrate from the transformed band mesh, not the whole GLB bounds.
+   // The supplied ring.glb uses a transformed TORUS with hole axis X in scene
+   // space; its untransformed mesh has hole axis Y.
+   model.updateMatrixWorld(true);
+   const bandCandidates:import("three").Mesh[]=[];
+   const gemstoneCandidates:import("three").Mesh[]=[];
+   model.traverse(node=>{
+     if(node instanceof THREE.Mesh){
+       if(/torus|band|shank/i.test(node.name))bandCandidates.push(node);
+       if(/dodecahedron|diamond|gem|stone/i.test(node.name))gemstoneCandidates.push(node);
+     }
+   });
+   const band=bandCandidates[0];
+   let pivotCenter=new THREE.Vector3();
+   let holeDirection=new THREE.Vector3(0,1,0);
+   let innerDiameter=0;
+   let stoneDirection=new THREE.Vector3(0,0,1);
+   const wholeBounds=new THREE.Box3().setFromObject(model);
+   if(band){
+     const localBounds=new THREE.Box3();
+     const pos=band.geometry.getAttribute("position");
+     if(!pos)throw new Error("Ring band contains no vertex positions");
+     localBounds.setFromBufferAttribute(pos);
+     const localCenter=localBounds.getCenter(new THREE.Vector3());
+     const localSize=localBounds.getSize(new THREE.Vector3());
+     const axisIndex=[localSize.x,localSize.y,localSize.z].indexOf(Math.min(localSize.x,localSize.y,localSize.z));
+     const localAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][axisIndex];
+     const centerWorld=band.localToWorld(localCenter.clone());
+     pivotCenter=model.worldToLocal(centerWorld.clone());
+     holeDirection=localAxis.clone().transformDirection(band.matrixWorld);
+     const across=[0,1,2].filter(i=>i!==axisIndex);
+     // World-transformed band diameter from geometry-space transverse axes.
+     const transformedBandBox=new THREE.Box3().setFromObject(band);
+     const transformedSize=transformedBandBox.getSize(new THREE.Vector3());
+     const outerDiameter=Math.max(transformedSize.x,transformedSize.y,transformedSize.z);
+     // Supplied source model: torus cross-section (0.01996055) and OD (0.22)
+     // are transformed nonuniformly. Use the measured cross-section in the ring
+     // plane instead of mistaking the gemstone for the band.
+     const bandSpan=[localSize.x,localSize.y,localSize.z];
+     const planeDiameter=Math.max(bandSpan[across[0]],bandSpan[across[1]]);
+     const planeScale=outerDiameter/Math.max(planeDiameter,1e-6);
+     const suppliedRing=/torus/i.test(band.name)&&gemstoneCandidates.some(m=>/dodecahedron/i.test(m.name));
+     innerDiameter=suppliedRing?0.18007887*planeScale:outerDiameter*.82;
+     if(gemstoneCandidates.length){
+       const stoneWorld=new THREE.Box3().setFromObject(gemstoneCandidates[0]).getCenter(new THREE.Vector3());
+       stoneDirection.subVectors(stoneWorld,centerWorld).normalize();
+     }
+   }else{
+     wholeBounds.getCenter(pivotCenter);
+     const dims=wholeBounds.getSize(new THREE.Vector3());
+     const minAxis=[dims.x,dims.y,dims.z].indexOf(Math.min(dims.x,dims.y,dims.z));
+     holeDirection.set(minAxis===0?1:0,minAxis===1?1:0,minAxis===2?1:0);
+     innerDiameter=Math.max(dims.x,dims.y,dims.z)*.72;
+   }
    const modelPivot=new THREE.Group();
-   model.position.sub(center);
+   model.position.sub(pivotCenter);
    modelPivot.add(model);
-   const dims=[size.x,size.y,size.z];
-   const minAxis=dims.indexOf(Math.min(...dims));
-   const holeAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][minAxis];
-   modelPivot.quaternion.setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
+   const axisAlign=new THREE.Quaternion().setFromUnitVectors(holeDirection,new THREE.Vector3(0,1,0));
+   const gemFacing=stoneDirection.clone().applyQuaternion(axisAlign);
+   gemFacing.y=0;
+   if(gemFacing.lengthSq()>1e-6){
+     const spin=new THREE.Quaternion().setFromAxisAngle(
+       new THREE.Vector3(0,1,0),-Math.atan2(gemFacing.x,gemFacing.z));
+     modelPivot.quaternion.copy(spin.multiply(axisAlign));
+   }else modelPivot.quaternion.copy(axisAlign);
    anchor.add(modelPivot);
-   const modelDiameter=Math.max(...dims.filter((_,i)=>i!==minAxis),1e-5);
+   const modelDiameter=Math.max(innerDiameter,1e-5);
    // Segmentation is optional and never blocks the core tracking pipeline.
    // Pixelwise person segmentation is intersected with the tracked finger ROI.
    const maskCanvas=document.createElement("canvas");
@@ -113,7 +167,7 @@ export default function HandTryOn({product}:{product:Product}){
    // Its radius is calibrated per frame; it MUST remain smaller than the ring.
    // This is geometric depth occlusion, not image segmentation.
    const fingerCore=new THREE.Mesh(
-     new THREE.CylinderGeometry(.36,.36,1.6,32,1,false),
+     new THREE.CylinderGeometry(modelDiameter*.42,modelDiameter*.42,modelDiameter*1.4,32,1,false),
      new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.FrontSide})
    );
    const occlusionMat=fingerCore.material as import("three").MeshBasicMaterial;
@@ -175,7 +229,7 @@ export default function HandTryOn({product}:{product:Product}){
      // Anatomical calibration: palm breadth approximates proximal finger breadth.
      // User-adjustable correction is visual, not an ISO ring-size measurement.
      const fingerWidth=Math.max(11,palmWidth*(product.category==="ring"?.225:.55)*calibration);
-     const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1)*1.18;
+     const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1);
      const world=(detected.worldLandmarks?.[0]||points) as Point[];
      const a=worldV(world[idx[0]]),b=worldV(world[idx[1]]);
      vy.subVectors(b,a).normalize();
@@ -253,8 +307,8 @@ export default function HandTryOn({product}:{product:Product}){
        shader.uniforms.maskEnabled.value=segmentationReady?1.0:0.0;
        (shader.uniforms.screenSize.value as import("three").Vector2).set(canvas.width,canvas.height);
      }
-     fingerCore.scale.set(.72,.95,.72);
-     fingerCore.position.set(0,0,-.16);
+     fingerCore.scale.set(1,1,1);
+     fingerCore.position.set(0,0,-modelDiameter*.08);
      initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
