@@ -91,10 +91,9 @@ export default function HandTryOn({product}:{product:Product}){
    let stoneDirection=new THREE.Vector3(0,0,1);
    const wholeBounds=new THREE.Box3().setFromObject(model);
    if(band){
-     const localBounds=new THREE.Box3();
-     const pos=band.geometry.getAttribute("position");
-     if(!pos)throw new Error("Ring band contains no vertex positions");
-     localBounds.setFromBufferAttribute(pos);
+     band.geometry.computeBoundingBox();
+     const localBounds=band.geometry.boundingBox;
+     if(!localBounds)throw new Error("Unable to determine ring band bounds");
      const localCenter=localBounds.getCenter(new THREE.Vector3());
      const localSize=localBounds.getSize(new THREE.Vector3());
      const axisIndex=[localSize.x,localSize.y,localSize.z].indexOf(Math.min(localSize.x,localSize.y,localSize.z));
