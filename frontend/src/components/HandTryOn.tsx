@@ -72,21 +72,25 @@ export default function HandTryOn({product}:{product:Product}){
    const bounds=new THREE.Box3().setFromObject(model);
    const size=new THREE.Vector3();bounds.getSize(size);
    const center=new THREE.Vector3();bounds.getCenter(center);
+   // Center the asset in its own pivot, not in the rotated parent.
+   const modelPivot=new THREE.Group();
    model.position.sub(center);
-   // Align the thinnest model dimension with the finger direction.
-   // For a ring-shaped asset, this is normally the axis through the hole.
+   modelPivot.add(model);
    const dims=[size.x,size.y,size.z];
    const minAxis=dims.indexOf(Math.min(...dims));
    const holeAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][minAxis];
-   const holeToY=new THREE.Quaternion().setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
-   const jewelry=new THREE.Group();
-   jewelry.add(model);
-   jewelry.quaternion.copy(holeToY);
-   const ringSpan=Math.max(...dims.filter((_,i)=>i!==minAxis),.00001);
-   anchor.add(jewelry);
-   // Occlusion is intentionally disabled until its depth geometry is calibrated.
-   // The previous depth-only cylinder concealed the entire ring on some devices.
-   const modelDiameter=ringSpan;
+   modelPivot.quaternion.setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
+   anchor.add(modelPivot);
+   const modelDiameter=Math.max(...dims.filter((_,i)=>i!==minAxis),1e-5);
+   // Realistic occlusion requires hand depth/segmentation. A conservative
+   // depth-only finger core hides only the rear interior, never the entire ring.
+   const fingerCore=new THREE.Mesh(
+     new THREE.CylinderGeometry(modelDiameter*.20,modelDiameter*.20,modelDiameter*.8,24,1,false),
+     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true})
+   );
+   fingerCore.renderOrder=-1;
+   fingerCore.position.z=-modelDiameter*.07;
+   anchor.add(fingerCore);
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
    const poseQuat=new THREE.Quaternion();
    const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();
@@ -120,13 +124,13 @@ export default function HandTryOn({product}:{product:Product}){
      const idx=product.category==="ring"?fingerBases[finger]:[0,9];
      const base=toScreen(points[idx[0]]),tip=toScreen(points[idx[1]]);
      const dx=tip.x-base.x,dy=tip.y-base.y;
-       const x=product.category==="ring"?lerp(base.x,tip.x,.33):lerp(base.x,tip.x,-.12);
-     const y=product.category==="ring"?lerp(base.y,tip.y,.33):lerp(base.y,tip.y,-.12);
+       const x=product.category==="ring"?lerp(base.x,tip.x,.14):lerp(base.x,tip.x,-.12);
+     const y=product.category==="ring"?lerp(base.y,tip.y,.14):lerp(base.y,tip.y,-.12);
        const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
      // The metacarpal span estimates finger diameter more reliably than bone length.
      const fingerWidth=product.category==="ring"?Math.max(13,palmWidth*.235):Math.max(25,palmWidth*.58);
-     const targetScale= fingerWidth/modelDiameter*fit*(product.scale||1)*1.13;
+     const targetScale= fingerWidth/modelDiameter*fit*(product.scale||1)*1.22;
      // Build a stable local finger frame in camera coordinates.
      vy.set(dx,-dy,(points[idx[1]].z-points[idx[0]].z)*Math.max(w,h)*.60).normalize();
      vx.set(indexBase.x-pinkyBase.x,pinkyBase.y-indexBase.y,
@@ -139,16 +143,18 @@ export default function HandTryOn({product}:{product:Product}){
      vx.crossVectors(vy,vz).normalize();
      basis.makeBasis(vx,vy,vz);
      poseQuat.setFromRotationMatrix(basis);
+     if(!Number.isFinite(targetScale)||!Number.isFinite(poseQuat.x)||!Number.isFinite(poseQuat.y)||!Number.isFinite(poseQuat.z)||!Number.isFinite(poseQuat.w))return;
      const position=new THREE.Vector3(x-w/2,h/2-y,0);
      const motion=Math.hypot(position.x-smoothPosition.x,position.y-smoothPosition.y);
      const positionGain=initialized?Math.min(.78,Math.max(.16,.16+motion*.018)):1;
-     const rotationGain=initialized?.22:1;
+     const rotationGain=initialized?.30:1;
      smoothPosition.lerp(position,positionGain);
      smoothQuaternion.slerp(poseQuat,rotationGain);
      anchor.position.copy(smoothPosition);
      anchor.quaternion.copy(smoothQuaternion);
      const scaleGain=initialized?.19:1;
      anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,scaleGain));
+     fingerCore.visible=product.category==="ring";
      initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
