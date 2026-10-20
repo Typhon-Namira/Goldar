@@ -37,16 +37,18 @@ export default function HandTryOn({product}:{product:Product}){
   if(!navigator.mediaDevices?.getUserMedia){setPhase("error");setMessage("Camera access requires a supported HTTPS browser.");return}
   const video=videoRef.current,canvas=canvasRef.current;
   if(!video||!canvas)return;
-  setPhase("loading");setMessage("Loading the hand tracking model and jewelry...");
+  setPhase("loading");setMessage("Opening camera...");
   try{
-   const [{HandLandmarker,FilesetResolver},THREE,{GLTFLoader}]=await Promise.all([
-     import("@mediapipe/tasks-vision"),import("three"),import("three/examples/jsm/loaders/GLTFLoader.js")]);
-   if(generation!==sessionRef.current)return;
    const stream=await navigator.mediaDevices.getUserMedia({
      audio:false,video:{facingMode:{ideal:facing},width:{ideal:960},height:{ideal:720},frameRate:{ideal:30,max:30}}});
    if(generation!==sessionRef.current){stream.getTracks().forEach(t=>t.stop());return}
    streamRef.current=stream;video.srcObject=stream;
    await video.play();
+   if(generation!==sessionRef.current)return;
+   setMessage("Camera ready — loading hand tracking...");
+   const [{HandLandmarker,FilesetResolver},THREE,{GLTFLoader}]=await Promise.all([
+     import("@mediapipe/tasks-vision"),import("three"),import("three/examples/jsm/loaders/GLTFLoader.js")]);
+   if(generation!==sessionRef.current)return;
    const resolver=await FilesetResolver.forVisionTasks(WASM_BASE);
    if(generation!==sessionRef.current)return;
    const hand=await HandLandmarker.createFromOptions(resolver,{
@@ -54,6 +56,7 @@ export default function HandTryOn({product}:{product:Product}){
      runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.65,
      minHandPresenceConfidence:.6,minTrackingConfidence:.6});
    if(generation!==sessionRef.current){hand.close();return}
+   setMessage("Hand tracker ready — loading jewelry model...");
    const loaded=await new GLTFLoader().loadAsync(product.glb_url);
    if(generation!==sessionRef.current){hand.close();return}
    const scene=new THREE.Scene();
@@ -157,6 +160,7 @@ export default function HandTryOn({product}:{product:Product}){
        materials.forEach(m=>m?.dispose())}});
      anchor.clear();
    };
+   setMessage("Ready — show your hand to the camera.");
    setPhase("active");raf=requestAnimationFrame(tick);
   }catch(err){
     if(generation!==sessionRef.current)return;
@@ -171,12 +175,12 @@ export default function HandTryOn({product}:{product:Product}){
   <div className="tryon-viewport">
    <video ref={videoRef} autoPlay muted playsInline className={"tryon-video "+(facing==="user"?"mirror":"")}/>
    <canvas ref={canvasRef} className={"tryon-canvas "+(facing==="user"?"mirror":"")}/>
-   {phase!=="active"&&<div className="tryon-overlay"><span>◇</span><h3 className="serif">Your private fitting room.</h3><p>Camera processing runs on your device.</p></div>}
+   {phase!=="active"&&phase!=="loading"&&<div className="tryon-overlay"><span>◇</span><h3 className="serif">Your private fitting room.</h3><p>Camera processing runs on your device.</p></div>}
    <div className="tryon-status" role="status">{message}</div>
   </div>
   <div className="tryon-controls">
    <div className="tryon-controlrow">
-    {phase==="active"?<button className="btn" onClick={stop}>STOP CAMERA</button>:<button className="btn gold" disabled={phase==="loading"||!supported||!product.glb_url} onClick={start}>{phase==="loading"?"INITIALIZING…":"START LIVE TRY-ON →"}</button>}
+    {phase==="active"?<button className="btn" onClick={stop}>STOP CAMERA</button>:<button className="btn gold" disabled={!supported||!product.glb_url} onClick={phase==="loading"?stop:start}>{phase==="loading"?"CANCEL INITIALIZING":"START LIVE TRY-ON →"}</button>}
     <button className="btn ghost" disabled={phase==="loading"} onClick={()=>setFacing(v=>v==="user"?"environment":"user")}>CAMERA: {facing==="user"?"FRONT":"REAR"}</button>
    </div>
    {product.category==="ring"&&<label className="tryon-setting">Finger <select value={finger} onChange={e=>setFinger(e.target.value as typeof finger)}><option value="ring">Ring</option><option value="index">Index</option><option value="middle">Middle</option><option value="pinky">Pinky</option></select></label>}
