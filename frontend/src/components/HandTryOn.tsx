@@ -134,7 +134,7 @@ export default function HandTryOn({product}:{product:Product}){
    let maskFailure=false;
    const maskImage=document.createElement("canvas");
    maskImage.width=256;maskImage.height=256;
-   const maskImageCtx=maskImage.getContext("2d",{willReadFrequently:true});
+
    const poseQuat=new THREE.Quaternion();
    const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();
    const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
@@ -209,7 +209,7 @@ export default function HandTryOn({product}:{product:Product}){
      // It writes depth only, hiding rear-facing band sections.
      fingerCore.visible=occlusion&&product.category==="ring";
      // Run segmentation at 8 FPS; landmark inference remains at camera cadence.
-     if(segmentEnabled&&segmenter&&maskCtx&&maskImageCtx&&time-segmentLast>125){
+     if(segmentEnabled&&segmenter&&maskCtx&&time-segmentLast>125){
        segmentLast=time;
        try{
          const result=segmenter.segmentForVideo(video,time);
@@ -293,7 +293,7 @@ export default function HandTryOn({product}:{product:Product}){
    <label className="tryon-setting">Visual size adjustment <input type="range" min=".6" max="1.5" step=".05" value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
    <label className="tryon-setting">Finger width calibration <input type="range" min=".75" max="1.35" step=".025" value={calibration} onChange={e=>setCalibration(Number(e.target.value))}/><strong>{Math.round(calibration*100)}%</strong></label>
    <label className="tryon-setting">Depth occlusion <input type="checkbox" checked={occlusion} onChange={e=>setOcclusion(e.target.checked)}/></label>
-   <p className="tryon-disclaimer">Experimental hand-tracked preview; not calibrated for physical sizing, ring circumference, depth occlusion or jewelry chain physics. Camera frames are processed locally and are not sent to Goldar servers. For exact fit, consult the jeweler.</p>
+   <p className="tryon-disclaimer">Beta fitting preview: hand landmarks and person-segmentation are processed on your device. Finger masking uses an approximate anatomical model and is not a physical ring-size measurement. For exact fit, consult the jeweler.</p>
    {(facing!=="environment"||finger!=="ring"||fit!==1||calibration!==1)&&phase==="active"&&<p className="tryon-hint">Changed fitting settings? Stop and restart the camera to apply them.</p>}
   </div>
  </section>;
