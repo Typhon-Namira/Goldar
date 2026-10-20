@@ -20,6 +20,8 @@ export default function HandTryOn({product}:{product:Product}){
  const [facing,setFacing]=useState<"user"|"environment">("environment");
  const [finger,setFinger]=useState<"index"|"middle"|"ring"|"pinky">("ring");
  const [fit,setFit]=useState(1);
+ const [occlusion,setOcclusion]=useState(true);
+ const [calibration,setCalibration]=useState(1);
  const supported=product.category==="ring"||product.category==="bracelet";
  const stop=useCallback(()=>{
    sessionRef.current+=1;
@@ -82,19 +84,21 @@ export default function HandTryOn({product}:{product:Product}){
    modelPivot.quaternion.setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
    anchor.add(modelPivot);
    const modelDiameter=Math.max(...dims.filter((_,i)=>i!==minAxis),1e-5);
-   // Realistic occlusion requires hand depth/segmentation. A conservative
-   // depth-only finger core hides only the rear interior, never the entire ring.
+   // The depth-only capsule approximates the proximal phalanx in camera space.
+   // Its radius is calibrated per frame; it MUST remain smaller than the ring.
+   // This is geometric depth occlusion, not image segmentation.
    const fingerCore=new THREE.Mesh(
-     new THREE.CylinderGeometry(modelDiameter*.20,modelDiameter*.20,modelDiameter*.8,24,1,false),
-     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true})
+     new THREE.CylinderGeometry(.36,.36,1.6,32,1,false),
+     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.FrontSide})
    );
    fingerCore.renderOrder=-1;
-   fingerCore.position.z=-modelDiameter*.07;
    anchor.add(fingerCore);
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
    const poseQuat=new THREE.Quaternion();
    const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();
    const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
+   let lastPoseTime=0;
+   const worldV=(pt:Point)=>new THREE.Vector3(pt.x,-pt.y,-pt.z);
    const cameraAspect=()=>({w:canvas.clientWidth,h:canvas.clientHeight});
    const toScreen=(pt:Point)=>{
      const {w,h}=cameraAspect();const vw=video.videoWidth||w,vh=video.videoHeight||h;
@@ -123,38 +127,48 @@ export default function HandTryOn({product}:{product:Product}){
      seen=time;anchor.visible=true;
      const idx=product.category==="ring"?fingerBases[finger]:[0,9];
      const base=toScreen(points[idx[0]]),tip=toScreen(points[idx[1]]);
-     const dx=tip.x-base.x,dy=tip.y-base.y;
-       const x=product.category==="ring"?lerp(base.x,tip.x,.14):lerp(base.x,tip.x,-.12);
-     const y=product.category==="ring"?lerp(base.y,tip.y,.14):lerp(base.y,tip.y,-.12);
-       const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
+     const x=lerp(base.x,tip.x,product.category==="ring"?.22:-.12);
+     const y=lerp(base.y,tip.y,product.category==="ring"?.22:-.12);
+     const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
-     // The metacarpal span estimates finger diameter more reliably than bone length.
-     const fingerWidth=product.category==="ring"?Math.max(13,palmWidth*.235):Math.max(25,palmWidth*.58);
-     const targetScale= fingerWidth/modelDiameter*fit*(product.scale||1)*1.22;
-     // Build a stable local finger frame in camera coordinates.
-     vy.set(dx,-dy,(points[idx[1]].z-points[idx[0]].z)*Math.max(w,h)*.60).normalize();
-     vx.set(indexBase.x-pinkyBase.x,pinkyBase.y-indexBase.y,
-       (points[5].z-points[17].z)*Math.max(w,h)*.5).normalize();
-     vx.addScaledVector(vy,-vx.dot(vy)).normalize();
-     if(vx.lengthSq()<.01)vx.set(1,0,0);
+     // Anatomical calibration: palm breadth approximates proximal finger breadth.
+     // User-adjustable correction is visual, not an ISO ring-size measurement.
+     const fingerWidth=Math.max(11,palmWidth*(product.category==="ring"?.225:.55)*calibration);
+     const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1)*1.18;
+     const world=(detected.worldLandmarks?.[0]||points) as Point[];
+     const a=worldV(world[idx[0]]),b=worldV(world[idx[1]]);
+     vy.subVectors(b,a).normalize();
+     vx.subVectors(worldV(world[5]),worldV(world[17])).normalize();
+     vx.addScaledVector(vy,-vx.dot(vy));
+     if(vx.lengthSq()<1e-6){
+       vx.set(1,0,0).addScaledVector(vy,-vy.x);
+     }
+     vx.normalize();
      vz.crossVectors(vx,vy).normalize();
-     // Keep the front of the ring oriented toward the camera.
      if(vz.z<0){vx.negate();vz.negate()}
      vx.crossVectors(vy,vz).normalize();
      basis.makeBasis(vx,vy,vz);
      poseQuat.setFromRotationMatrix(basis);
-     if(!Number.isFinite(targetScale)||!Number.isFinite(poseQuat.x)||!Number.isFinite(poseQuat.y)||!Number.isFinite(poseQuat.z)||!Number.isFinite(poseQuat.w))return;
+     if(!Number.isFinite(targetScale)||targetScale<=0||!Number.isFinite(poseQuat.w)){
+       anchor.visible=false;renderer.render(scene,camera);return;
+     }
      const position=new THREE.Vector3(x-w/2,h/2-y,0);
-     const motion=Math.hypot(position.x-smoothPosition.x,position.y-smoothPosition.y);
-     const positionGain=initialized?Math.min(.78,Math.max(.16,.16+motion*.018)):1;
-     const rotationGain=initialized?.30:1;
+     const seconds=lastPoseTime?Math.min(.1,(time-lastPoseTime)/1000):.033;
+     lastPoseTime=time;
+     const displacement=initialized?position.distanceTo(smoothPosition):0;
+     const positionGain=initialized?Math.min(.82,1-Math.exp(-seconds*(8+displacement*.06))):1;
+     const rotationGain=initialized?1-Math.exp(-seconds*10):1;
+     const sizeGain=initialized?1-Math.exp(-seconds*7):1;
      smoothPosition.lerp(position,positionGain);
      smoothQuaternion.slerp(poseQuat,rotationGain);
      anchor.position.copy(smoothPosition);
      anchor.quaternion.copy(smoothQuaternion);
-     const scaleGain=initialized?.19:1;
-     anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,scaleGain));
-     fingerCore.visible=product.category==="ring";
+     anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,sizeGain));
+     // Calibrated model-space core: front surface sits behind the front gem.
+     // It writes depth only, hiding rear-facing band sections.
+     fingerCore.visible=occlusion&&product.category==="ring";
+     fingerCore.scale.set(.72,.95,.72);
+     fingerCore.position.set(0,0,-.16);
      initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
@@ -174,7 +188,7 @@ export default function HandTryOn({product}:{product:Product}){
     setPhase("error");
     setMessage(err instanceof Error?err.message:"Unable to start virtual try-on.");
   }
- },[stop,supported,product.glb_url,product.scale,product.category,facing,finger,fit]);
+ },[stop,supported,product.glb_url,product.scale,product.category,facing,finger,fit,occlusion,calibration]);
 
  useEffect(()=>()=>{sessionRef.current++;cleanRef.current();streamRef.current?.getTracks().forEach(t=>t.stop())},[]);
  return <section className="tryon-panel">
@@ -191,8 +205,10 @@ export default function HandTryOn({product}:{product:Product}){
    </div>
    {product.category==="ring"&&<label className="tryon-setting">Finger <select value={finger} onChange={e=>setFinger(e.target.value as typeof finger)}><option value="ring">Ring</option><option value="index">Index</option><option value="middle">Middle</option><option value="pinky">Pinky</option></select></label>}
    <label className="tryon-setting">Visual size adjustment <input type="range" min=".6" max="1.5" step=".05" value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
+   <label className="tryon-setting">Finger width calibration <input type="range" min=".75" max="1.35" step=".025" value={calibration} onChange={e=>setCalibration(Number(e.target.value))}/><strong>{Math.round(calibration*100)}%</strong></label>
+   <label className="tryon-setting">Depth occlusion <input type="checkbox" checked={occlusion} onChange={e=>setOcclusion(e.target.checked)}/></label>
    <p className="tryon-disclaimer">Experimental hand-tracked preview; not calibrated for physical sizing, ring circumference, depth occlusion or jewelry chain physics. Camera frames are processed locally and are not sent to Goldar servers. For exact fit, consult the jeweler.</p>
-   {(facing!=="environment"||finger!=="ring"||fit!==1)&&phase==="active"&&<p className="tryon-hint">Changed fitting settings? Stop and restart the camera to apply them.</p>}
+   {(facing!=="environment"||finger!=="ring"||fit!==1||calibration!==1)&&phase==="active"&&<p className="tryon-hint">Changed fitting settings? Stop and restart the camera to apply them.</p>}
   </div>
  </section>;
 }
