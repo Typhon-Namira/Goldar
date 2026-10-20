@@ -81,14 +81,8 @@ export default function HandTryOn({product}:{product:Product}){
    jewelry.quaternion.copy(holeToY);
    const ringSpan=Math.max(...dims.filter((_,i)=>i!==minAxis),.00001);
    anchor.add(jewelry);
-   const occluder=new THREE.Mesh(
-     new THREE.CylinderGeometry(.44,.44,1.6,20,1,true),
-     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.DoubleSide})
-   );
-   // Draw the invisible approximate finger depth before the ring.
-   occluder.renderOrder=1;
-   model.traverse(o=>{if(o instanceof THREE.Mesh)o.renderOrder=2});
-   anchor.add(occluder);
+   // Occlusion is intentionally disabled until its depth geometry is calibrated.
+   // The previous depth-only cylinder concealed the entire ring on some devices.
    const modelDiameter=ringSpan;
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
    const poseQuat=new THREE.Quaternion();
@@ -152,10 +146,6 @@ export default function HandTryOn({product}:{product:Product}){
      anchor.quaternion.copy(smoothQuaternion);
      const scaleGain=initialized?.19:1;
      anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,scaleGain));
-     // Slightly smaller than the visual ring diameter to avoid covering the gem.
-     occluder.scale.set(.64,.8,.64);
-     // Behind the front surface of the jewelry, while hiding its rear arc.
-     occluder.position.z=-.13*modelDiameter;
      initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
