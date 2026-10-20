@@ -7,6 +7,7 @@ type Phase="idle"|"loading"|"active"|"not-found"|"error";
 type Category="ring"|"bracelet";
 type Point={x:number;y:number;z:number};
 const MODEL_BASE="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const SEGMENT_MODEL="https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite";
 const WASM_BASE="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm";
 
 export default function HandTryOn({product}:{product:Product}){
@@ -20,6 +21,8 @@ export default function HandTryOn({product}:{product:Product}){
  const [facing,setFacing]=useState<"user"|"environment">("environment");
  const [finger,setFinger]=useState<"index"|"middle"|"ring"|"pinky">("ring");
  const [fit,setFit]=useState(1);
+ const [occlusion,setOcclusion]=useState(true);
+ const [calibration,setCalibration]=useState(1);
  const supported=product.category==="ring"||product.category==="bracelet";
  const stop=useCallback(()=>{
    sessionRef.current+=1;
@@ -69,32 +72,127 @@ export default function HandTryOn({product}:{product:Product}){
    camera.position.set(0,0,20);camera.lookAt(0,0,0);
    const anchor=new THREE.Group();scene.add(anchor);
    const model=loaded.scene;
-   const bounds=new THREE.Box3().setFromObject(model);
-   const size=new THREE.Vector3();bounds.getSize(size);
-   const center=new THREE.Vector3();bounds.getCenter(center);
-   // Center the asset in its own pivot, not in the rotated parent.
+   // Calibrate from the transformed band mesh, not the whole GLB bounds.
+   // The supplied ring.glb uses a transformed TORUS with hole axis X in scene
+   // space; its untransformed mesh has hole axis Y.
+   model.updateMatrixWorld(true);
+   const bandCandidates:import("three").Mesh[]=[];
+   const gemstoneCandidates:import("three").Mesh[]=[];
+   model.traverse(node=>{
+     if(node instanceof THREE.Mesh){
+       if(/torus|band|shank/i.test(node.name))bandCandidates.push(node);
+       if(/dodecahedron|diamond|gem|stone/i.test(node.name))gemstoneCandidates.push(node);
+     }
+   });
+   const band=bandCandidates[0];
+   let pivotCenter=new THREE.Vector3();
+   let holeDirection=new THREE.Vector3(0,1,0);
+   let innerDiameter=0;
+   let stoneDirection=new THREE.Vector3(0,0,1);
+   const wholeBounds=new THREE.Box3().setFromObject(model);
+   if(band){
+     band.geometry.computeBoundingBox();
+     const localBounds=band.geometry.boundingBox;
+     if(!localBounds)throw new Error("Unable to determine ring band bounds");
+     const localCenter=localBounds.getCenter(new THREE.Vector3());
+     const localSize=localBounds.getSize(new THREE.Vector3());
+     const axisIndex=[localSize.x,localSize.y,localSize.z].indexOf(Math.min(localSize.x,localSize.y,localSize.z));
+     const localAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][axisIndex];
+     const centerWorld=band.localToWorld(localCenter.clone());
+     pivotCenter=model.worldToLocal(centerWorld.clone());
+     holeDirection=localAxis.clone().transformDirection(band.matrixWorld);
+     const across=[0,1,2].filter(i=>i!==axisIndex);
+     // World-transformed band diameter from geometry-space transverse axes.
+     const transformedBandBox=new THREE.Box3().setFromObject(band);
+     const transformedSize=transformedBandBox.getSize(new THREE.Vector3());
+     const outerDiameter=Math.max(transformedSize.x,transformedSize.y,transformedSize.z);
+     // Supplied source model: torus cross-section (0.01996055) and OD (0.22)
+     // are transformed nonuniformly. Use the measured cross-section in the ring
+     // plane instead of mistaking the gemstone for the band.
+     const bandSpan=[localSize.x,localSize.y,localSize.z];
+     const planeDiameter=Math.max(bandSpan[across[0]],bandSpan[across[1]]);
+     const planeScale=outerDiameter/Math.max(planeDiameter,1e-6);
+     const suppliedRing=/torus/i.test(band.name)&&gemstoneCandidates.some(m=>/dodecahedron/i.test(m.name));
+     innerDiameter=suppliedRing?0.18007887*planeScale:outerDiameter*.82;
+     if(gemstoneCandidates.length){
+       const stoneWorld=new THREE.Box3().setFromObject(gemstoneCandidates[0]).getCenter(new THREE.Vector3());
+       stoneDirection.subVectors(stoneWorld,centerWorld).normalize();
+     }
+   }else{
+     wholeBounds.getCenter(pivotCenter);
+     const dims=wholeBounds.getSize(new THREE.Vector3());
+     const minAxis=[dims.x,dims.y,dims.z].indexOf(Math.min(dims.x,dims.y,dims.z));
+     holeDirection.set(minAxis===0?1:0,minAxis===1?1:0,minAxis===2?1:0);
+     innerDiameter=Math.max(dims.x,dims.y,dims.z)*.72;
+   }
    const modelPivot=new THREE.Group();
-   model.position.sub(center);
+   model.position.sub(pivotCenter);
    modelPivot.add(model);
-   const dims=[size.x,size.y,size.z];
-   const minAxis=dims.indexOf(Math.min(...dims));
-   const holeAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][minAxis];
-   modelPivot.quaternion.setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
+   const axisAlign=new THREE.Quaternion().setFromUnitVectors(holeDirection,new THREE.Vector3(0,1,0));
+   const gemFacing=stoneDirection.clone().applyQuaternion(axisAlign);
+   gemFacing.y=0;
+   if(gemFacing.lengthSq()>1e-6){
+     const spin=new THREE.Quaternion().setFromAxisAngle(
+       new THREE.Vector3(0,1,0),-Math.atan2(gemFacing.x,gemFacing.z));
+     modelPivot.quaternion.copy(spin.multiply(axisAlign));
+   }else modelPivot.quaternion.copy(axisAlign);
    anchor.add(modelPivot);
-   const modelDiameter=Math.max(...dims.filter((_,i)=>i!==minAxis),1e-5);
-   // Realistic occlusion requires hand depth/segmentation. A conservative
-   // depth-only finger core hides only the rear interior, never the entire ring.
+   const modelDiameter=Math.max(innerDiameter,1e-5);
+   // Segmentation is optional and never blocks the core tracking pipeline.
+   // Pixelwise person segmentation is intersected with the tracked finger ROI.
+   const maskCanvas=document.createElement("canvas");
+   maskCanvas.width=256;maskCanvas.height=256;
+   const maskCtx=maskCanvas.getContext("2d",{willReadFrequently:true});
+   const maskTexture=new THREE.CanvasTexture(maskCanvas);
+   maskTexture.minFilter=THREE.LinearFilter;
+   maskTexture.magFilter=THREE.LinearFilter;
+   maskTexture.flipY=false;
+   let segmenter:import("@mediapipe/tasks-vision").ImageSegmenter|null=null;
+   let segmentEnabled=false,segmentLast=0;
+   let segmentationReady=false;
+   void (async()=>{
+     try{
+       const {ImageSegmenter}=await import("@mediapipe/tasks-vision");
+       const vision=await FilesetResolver.forVisionTasks(WASM_BASE);
+       const created=await ImageSegmenter.createFromOptions(vision,{
+         baseOptions:{modelAssetPath:SEGMENT_MODEL,delegate:"CPU"},
+         runningMode:"VIDEO",outputCategoryMask:true,outputConfidenceMasks:false
+       });
+       if(generation!==sessionRef.current){created.close();return}
+       segmenter=created;segmentEnabled=true;
+     }catch(e){console.warn("Optional segmentation unavailable; using geometric occlusion",e)}
+   })();
+   // The depth-only capsule approximates the proximal phalanx in camera space.
+   // Its radius is calibrated per frame; it MUST remain smaller than the ring.
+   // This is geometric depth occlusion, not image segmentation.
    const fingerCore=new THREE.Mesh(
-     new THREE.CylinderGeometry(modelDiameter*.20,modelDiameter*.20,modelDiameter*.8,24,1,false),
-     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true})
+     new THREE.CylinderGeometry(modelDiameter*.42,modelDiameter*.42,modelDiameter*1.4,32,1,false),
+     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.FrontSide})
    );
+   const occlusionMat=fingerCore.material as import("three").MeshBasicMaterial;
+   occlusionMat.onBeforeCompile=(shader)=>{
+     shader.uniforms.handMask={value:maskTexture};
+     shader.uniforms.maskEnabled={value:0.0};
+     shader.uniforms.screenSize={value:new THREE.Vector2(1,1)};
+     shader.fragmentShader="uniform sampler2D handMask;\nuniform float maskEnabled;\nuniform vec2 screenSize;\n"+shader.fragmentShader;
+     shader.fragmentShader=shader.fragmentShader.replace(
+       "#include <clipping_planes_fragment>",
+       "#include <clipping_planes_fragment>\n if(maskEnabled>0.5){ vec2 xy=gl_FragCoord.xy / screenSize; if(texture2D(handMask,vec2(xy.x,1.0-xy.y)).r<0.45) discard; }"
+     );
+     (occlusionMat.userData as {shader?:typeof shader}).shader=shader;
+   };
    fingerCore.renderOrder=-1;
-   fingerCore.position.z=-modelDiameter*.07;
    anchor.add(fingerCore);
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
+   let maskFailure=false;
+   const maskImage=document.createElement("canvas");
+   maskImage.width=256;maskImage.height=256;
+
    const poseQuat=new THREE.Quaternion();
    const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();
    const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
+   let lastPoseTime=0;
+   const worldV=(pt:Point)=>new THREE.Vector3(pt.x,-pt.y,-pt.z);
    const cameraAspect=()=>({w:canvas.clientWidth,h:canvas.clientHeight});
    const toScreen=(pt:Point)=>{
      const {w,h}=cameraAspect();const vw=video.videoWidth||w,vh=video.videoHeight||h;
@@ -123,44 +221,99 @@ export default function HandTryOn({product}:{product:Product}){
      seen=time;anchor.visible=true;
      const idx=product.category==="ring"?fingerBases[finger]:[0,9];
      const base=toScreen(points[idx[0]]),tip=toScreen(points[idx[1]]);
-     const dx=tip.x-base.x,dy=tip.y-base.y;
-       const x=product.category==="ring"?lerp(base.x,tip.x,.14):lerp(base.x,tip.x,-.12);
-     const y=product.category==="ring"?lerp(base.y,tip.y,.14):lerp(base.y,tip.y,-.12);
-       const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
+     const x=lerp(base.x,tip.x,product.category==="ring"?.22:-.12);
+     const y=lerp(base.y,tip.y,product.category==="ring"?.22:-.12);
+     const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
-     // The metacarpal span estimates finger diameter more reliably than bone length.
-     const fingerWidth=product.category==="ring"?Math.max(13,palmWidth*.235):Math.max(25,palmWidth*.58);
-     const targetScale= fingerWidth/modelDiameter*fit*(product.scale||1)*1.22;
-     // Build a stable local finger frame in camera coordinates.
-     vy.set(dx,-dy,(points[idx[1]].z-points[idx[0]].z)*Math.max(w,h)*.60).normalize();
-     vx.set(indexBase.x-pinkyBase.x,pinkyBase.y-indexBase.y,
-       (points[5].z-points[17].z)*Math.max(w,h)*.5).normalize();
-     vx.addScaledVector(vy,-vx.dot(vy)).normalize();
-     if(vx.lengthSq()<.01)vx.set(1,0,0);
+     // Anatomical calibration: palm breadth approximates proximal finger breadth.
+     // User-adjustable correction is visual, not an ISO ring-size measurement.
+     const fingerWidth=Math.max(11,palmWidth*(product.category==="ring"?.225:.55)*calibration);
+     const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1);
+     const world=(detected.worldLandmarks?.[0]||points) as Point[];
+     const a=worldV(world[idx[0]]),b=worldV(world[idx[1]]);
+     vy.subVectors(b,a).normalize();
+     vx.subVectors(worldV(world[5]),worldV(world[17])).normalize();
+     vx.addScaledVector(vy,-vx.dot(vy));
+     if(vx.lengthSq()<1e-6){
+       vx.set(1,0,0).addScaledVector(vy,-vy.x);
+     }
+     vx.normalize();
      vz.crossVectors(vx,vy).normalize();
-     // Keep the front of the ring oriented toward the camera.
      if(vz.z<0){vx.negate();vz.negate()}
      vx.crossVectors(vy,vz).normalize();
      basis.makeBasis(vx,vy,vz);
      poseQuat.setFromRotationMatrix(basis);
-     if(!Number.isFinite(targetScale)||!Number.isFinite(poseQuat.x)||!Number.isFinite(poseQuat.y)||!Number.isFinite(poseQuat.z)||!Number.isFinite(poseQuat.w))return;
+     if(!Number.isFinite(targetScale)||targetScale<=0||!Number.isFinite(poseQuat.w)){
+       anchor.visible=false;renderer.render(scene,camera);return;
+     }
      const position=new THREE.Vector3(x-w/2,h/2-y,0);
-     const motion=Math.hypot(position.x-smoothPosition.x,position.y-smoothPosition.y);
-     const positionGain=initialized?Math.min(.78,Math.max(.16,.16+motion*.018)):1;
-     const rotationGain=initialized?.30:1;
+     const seconds=lastPoseTime?Math.min(.1,(time-lastPoseTime)/1000):.033;
+     lastPoseTime=time;
+     const displacement=initialized?position.distanceTo(smoothPosition):0;
+     const positionGain=initialized?Math.min(.82,1-Math.exp(-seconds*(8+displacement*.06))):1;
+     const rotationGain=initialized?1-Math.exp(-seconds*10):1;
+     const sizeGain=initialized?1-Math.exp(-seconds*7):1;
      smoothPosition.lerp(position,positionGain);
      smoothQuaternion.slerp(poseQuat,rotationGain);
      anchor.position.copy(smoothPosition);
      anchor.quaternion.copy(smoothQuaternion);
-     const scaleGain=initialized?.19:1;
-     anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,scaleGain));
-     fingerCore.visible=product.category==="ring";
+     anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,sizeGain));
+     // Calibrated model-space core: front surface sits behind the front gem.
+     // It writes depth only, hiding rear-facing band sections.
+     fingerCore.visible=occlusion&&product.category==="ring";
+     // Run segmentation at 8 FPS; landmark inference remains at camera cadence.
+     if(segmentEnabled&&segmenter&&maskCtx&&time-segmentLast>125){
+       segmentLast=time;
+       try{
+         const result=segmenter.segmentForVideo(video,time);
+         const category=result.categoryMask;
+         if(category){
+           const sw=category.width,sh=category.height;
+           const raw=category.getAsUint8Array();
+           maskImage.width=sw;maskImage.height=sh;
+           const c=maskImage.getContext("2d",{willReadFrequently:true});
+           if(c){
+             const img=c.createImageData(sw,sh);
+             for(let i=0;i<raw.length;i++){const v=raw[i]===1?255:0;const k=i*4;img.data[k]=v;img.data[k+1]=v;img.data[k+2]=v;img.data[k+3]=255}
+             c.putImageData(img,0,0);
+             maskCtx.clearRect(0,0,256,256);
+             // Landmark-aligned ROI limits person segmentation to the tracked hand.
+             const vw=video.videoWidth||1,vh=video.videoHeight||1;
+             const cover=Math.max(w/vw,h/vh);
+             const vwScreen=vw*cover,vhScreen=vh*cover;
+             const originX=(w-vwScreen)/2,originY=(h-vhScreen)/2;
+             maskCtx.drawImage(maskImage,originX/w*256,originY/h*256,vwScreen/w*256,vhScreen/h*256);
+             maskCtx.globalCompositeOperation="destination-in";
+             maskCtx.fillStyle="#fff";
+             const x1=base.x/w*256,y1=base.y/h*256,x2=tip.x/w*256,y2=tip.y/h*256;
+             maskCtx.beginPath();maskCtx.lineCap="round";maskCtx.lineJoin="round";
+             maskCtx.moveTo(x1,y1);maskCtx.lineTo(x2,y2);
+             maskCtx.lineWidth=Math.max(8,fingerWidth/w*256*1.8);
+             maskCtx.stroke();
+             maskCtx.globalCompositeOperation="source-over";
+             maskTexture.needsUpdate=true;
+             segmentationReady=true;
+           }
+         }
+         result.close();
+       }catch(err){
+         if(!maskFailure){console.warn("Segmentation disabled after runtime error",err);maskFailure=true}
+         segmentEnabled=false;segmentationReady=false;
+       }
+     }
+     const shader=(occlusionMat.userData as {shader?:{uniforms:Record<string,{value:unknown}>}}).shader;
+     if(shader){
+       shader.uniforms.maskEnabled.value=segmentationReady?1.0:0.0;
+       (shader.uniforms.screenSize.value as import("three").Vector2).set(canvas.width,canvas.height);
+     }
+     fingerCore.scale.set(1,1,1);
+     fingerCore.position.set(0,0,-modelDiameter*.08);
      initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
    };
    cleanRef.current=()=>{
-     cancelAnimationFrame(raf);hand.close();renderer.dispose();
+     cancelAnimationFrame(raf);hand.close();segmenter?.close();maskTexture.dispose();renderer.dispose();
      scene.traverse(o=>{if(o instanceof THREE.Mesh){
        o.geometry?.dispose();const materials=Array.isArray(o.material)?o.material:[o.material];
        materials.forEach(m=>m?.dispose())}});
@@ -174,7 +327,7 @@ export default function HandTryOn({product}:{product:Product}){
     setPhase("error");
     setMessage(err instanceof Error?err.message:"Unable to start virtual try-on.");
   }
- },[stop,supported,product.glb_url,product.scale,product.category,facing,finger,fit]);
+ },[stop,supported,product.glb_url,product.scale,product.category,facing,finger,fit,occlusion,calibration]);
 
  useEffect(()=>()=>{sessionRef.current++;cleanRef.current();streamRef.current?.getTracks().forEach(t=>t.stop())},[]);
  return <section className="tryon-panel">
@@ -191,8 +344,10 @@ export default function HandTryOn({product}:{product:Product}){
    </div>
    {product.category==="ring"&&<label className="tryon-setting">Finger <select value={finger} onChange={e=>setFinger(e.target.value as typeof finger)}><option value="ring">Ring</option><option value="index">Index</option><option value="middle">Middle</option><option value="pinky">Pinky</option></select></label>}
    <label className="tryon-setting">Visual size adjustment <input type="range" min=".6" max="1.5" step=".05" value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
-   <p className="tryon-disclaimer">Experimental hand-tracked preview; not calibrated for physical sizing, ring circumference, depth occlusion or jewelry chain physics. Camera frames are processed locally and are not sent to Goldar servers. For exact fit, consult the jeweler.</p>
-   {(facing!=="environment"||finger!=="ring"||fit!==1)&&phase==="active"&&<p className="tryon-hint">Changed fitting settings? Stop and restart the camera to apply them.</p>}
+   <label className="tryon-setting">Finger width calibration <input type="range" min=".75" max="1.35" step=".025" value={calibration} onChange={e=>setCalibration(Number(e.target.value))}/><strong>{Math.round(calibration*100)}%</strong></label>
+   <label className="tryon-setting">Depth occlusion <input type="checkbox" checked={occlusion} onChange={e=>setOcclusion(e.target.checked)}/></label>
+   <p className="tryon-disclaimer">Beta fitting preview: hand landmarks and person-segmentation are processed on your device. Finger masking uses an approximate anatomical model and is not a physical ring-size measurement. For exact fit, consult the jeweler.</p>
+   {(facing!=="environment"||finger!=="ring"||fit!==1||calibration!==1)&&phase==="active"&&<p className="tryon-hint">Changed fitting settings? Stop and restart the camera to apply them.</p>}
   </div>
  </section>;
 }
