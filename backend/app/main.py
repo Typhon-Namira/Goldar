@@ -260,3 +260,29 @@ def presign_upload(body:UploadInput,_:bool=Depends(admin)):
           ExpiresIn=300)
     except Exception: raise HTTPException(503,"Unable to sign upload")
     return {"upload":signed,"asset_url":f"{settings.s3_public_url.rstrip('/')}/{key}"}
+
+# Read-only catalog intelligence endpoints. No schema migration required.
+@app.get("/api/admin/overview")
+def admin_overview(_:bool=Depends(admin),session:Session=Depends(db)):
+    store_count=session.scalar(select(func.count(Store.id))) or 0
+    live_stores=session.scalar(select(func.count(Store.id)).where(Store.published==True)) or 0
+    pieces=session.scalar(select(func.count(Product.id))) or 0
+    live_pieces=session.scalar(select(func.count(Product.id)).join(Store).where(Product.published==True,Store.published==True)) or 0
+    return {"stores":store_count,"published_stores":live_stores,"products":pieces,"published_products":live_pieces}
+
+@app.get("/api/admin/products")
+def admin_all_products(
+    store_id:Optional[str]=None,
+    category:Optional[str]=None,
+    limit:int=Query(default=50,ge=1,le=200),
+    offset:int=Query(default=0,ge=0),
+    _:bool=Depends(admin),
+    session:Session=Depends(db)):
+    query=select(Product).order_by(Product.created_at.desc())
+    if store_id:
+        query=query.where(Product.store_id==store_id)
+    if category:
+        if category not in ("ring","bracelet","necklace","earring"):
+            raise HTTPException(422,"Unsupported jewelry category")
+        query=query.where(Product.category==category)
+    return [product_dict(p) for p in session.scalars(query.limit(limit).offset(offset)).all()]
