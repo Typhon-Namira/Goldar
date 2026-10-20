@@ -179,14 +179,14 @@ export default function HandTryOn({product}:{product:Product}){
      shader.uniforms.handMask={value:maskTexture};
      shader.uniforms.maskEnabled={value:0.0};
      shader.uniforms.screenSize={value:new THREE.Vector2(1,1)};
-     shader.fragmentShader="uniform sampler2D handMask;
+     shader.fragmentShader=`uniform sampler2D handMask;
 uniform float maskEnabled;
 uniform vec2 screenSize;
-"+shader.fragmentShader;
+`+shader.fragmentShader;
      shader.fragmentShader=shader.fragmentShader.replace(
        "#include <clipping_planes_fragment>",
-       "#include <clipping_planes_fragment>
- if(maskEnabled>0.5){ vec2 xy=gl_FragCoord.xy / screenSize; if(texture2D(handMask,vec2(xy.x,1.0-xy.y)).r<0.45) discard; }"
+       `#include <clipping_planes_fragment>
+ if(maskEnabled>0.5){ vec2 xy=gl_FragCoord.xy / screenSize; if(texture2D(handMask,vec2(xy.x,1.0-xy.y)).r<0.45) discard; }`
      );
      (occlusionMat.userData as {shader?:typeof shader}).shader=shader;
    };
