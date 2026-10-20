@@ -15,7 +15,8 @@
     "three": "^0.183.0",
     "@google/model-viewer": "^4.4.0",
     "qrcode.react": "^4.2.0",
-    "lucide-react": "^0.468.0"
+    "lucide-react": "^0.468.0",
+    "@mediapipe/tasks-vision": "0.10.32"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

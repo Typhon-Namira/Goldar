@@ -1,2 +1,24 @@
-import {API,Product,Store} from "@/lib/api";import {notFound} from "next/navigation";import Link from "next/link";import ModelViewer from "@/components/ModelViewer";
-export default async function ARPage({params}:{params:Promise<{id:string}>}){const {id}=await params;const res=await fetch(API+"/api/public/products/"+encodeURIComponent(id),{cache:"no-store"});if(!res.ok)notFound();const data:{product:Product;store:Store}=await res.json();const {product:p,store:s}=data;return <main className="catalog"><header className="container catalog-header"><Link className="brandmark" href={"/s/"+s.slug}>{s.name}</Link><nav><Link href={"/s/"+s.slug+"/p/"+p.slug}>Product details ↗</Link></nav></header><section className="container" style={{maxWidth:1100,paddingTop:40}}><p className="eyebrow">Goldar Immersive Experience</p><h1 className="serif" style={{fontSize:"clamp(48px,6vw,90px)",margin:"12px 0 24px"}}>{p.name}</h1><div style={{height:"min(65vh,650px)",background:"#eae5dc"}}><ModelViewer glb={p.glb_url} usdz={p.usdz_url} poster={p.cover_url} ar={p.ar_enabled} alt={p.name}/></div><p className="muted" style={{lineHeight:1.8,maxWidth:680,fontSize:12}}>On supported devices, tap the AR icon in the 3D viewer to place the piece in your surroundings. Precise live body-tracked virtual try-on is a separate feature and is not yet implemented.</p></section></main>}
+import {API,Product,Store} from "@/lib/api";
+import {notFound} from "next/navigation";
+import Link from "next/link";
+import ModelViewer from "@/components/ModelViewer";
+import HandTryOn from "@/components/HandTryOn";
+export default async function ARPage({params}:{params:Promise<{id:string}>}){
+ const {id}=await params;
+ const response=await fetch(API+"/api/public/products/"+encodeURIComponent(id),{cache:"no-store"});
+ if(!response.ok)notFound();
+ const {product:p,store:s}:{product:Product;store:Store}=await response.json();
+ const hand=p.category==="ring"||p.category==="bracelet";
+ return <main className="catalog luxe-catalog">
+ <div className="luxe-topline">GOLDAR IMMERSIVE STUDIO <span>AN INTERACTIVE JEWELRY EXPERIENCE</span> MOBILE ATELIER</div>
+ <header className="container catalog-header luxe-nav">
+ <Link href={"/s/"+s.slug+"/p/"+p.slug} className="luxe-nav-link">← THE PIECE</Link>
+ <Link className="brandmark luxe-wordmark" href={"/s/"+s.slug}>{s.name}</Link><div className="luxe-nav-actions"><Link href={"/s/"+s.slug}>COLLECTION ↗</Link></div>
+ </header>
+ <section className="container ar-page">
+ <div className="ar-page-heading"><p className="eyebrow">GOLDAR / THE FITTING ROOM</p><h1 className="serif">Experience <em>{p.name}.</em></h1><p>Discover the piece on your own terms, in every dimension.</p></div>
+ {hand&&p.ar_enabled&&p.glb_url?<HandTryOn product={p}/>:<div className="ar-unavailable"><h2 className="serif">Live body try-on is in development.</h2><p>Hand tracking is currently experimental for rings and bracelets. Other jewelry categories require specialized face or body tracking.</p></div>}
+ <div className="ar-native"><div><p className="eyebrow">THE OBJECT IN THREE DIMENSIONS</p><h2 className="serif">Explore every detail.</h2><p>Turn the piece in 3D or use native AR to place it in your surroundings, where supported. This is separate from live body tracking.</p></div><div className="ar-native-view"><ModelViewer glb={p.glb_url} usdz={p.usdz_url} poster={p.cover_url} ar={p.ar_enabled} alt={p.name}/></div></div>
+ </section>
+ </main>;
+}

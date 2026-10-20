@@ -101,3 +101,35 @@
 .luxe-detail-return{padding-bottom:100px;font-size:10px;letter-spacing:.2em}
 @media(max-width:900px){.luxe-detail-layout{grid-template-columns:1fr;gap:28px}.luxe-detail-viewer{height:520px}.luxe-detail-content h1{font-size:80px}}
 @media(max-width:600px){.luxe-detail-viewer{height:410px}.luxe-detail-content h1{font-size:64px}.luxe-detail-buttons .btn{flex:1}.luxe-detail-facts{margin:25px 0}.luxe-viewer-foot{font-size:7px}.luxe-detail-return{padding-bottom:60px}}
+
+
+/* Experimental client-side virtual fitting room */
+.ar-page{padding-top:55px;padding-bottom:90px}
+.ar-page-heading{text-align:center;max-width:850px;margin:0 auto 52px}
+.ar-page-heading h1{font-size:clamp(55px,7vw,105px);line-height:1.05;margin:19px 0}
+.ar-page-heading h1 em{font-style:italic;color:#a28b68}
+.ar-page-heading>p:last-child{font-size:13px;color:var(--muted);line-height:1.8}
+.tryon-panel{background:#ece7dd;border:1px solid #ded7c9;max-width:940px;margin:0 auto}
+.tryon-viewport{height:min(72vh,670px);min-height:360px;position:relative;background:#22251f;overflow:hidden}
+.tryon-video,.tryon-canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.tryon-video.mirror,.tryon-canvas.mirror{transform:scaleX(-1)}
+.tryon-canvas{pointer-events:none}
+.tryon-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#f9f5ed;background:radial-gradient(ellipse at center,#35392f,#1b1e1b);text-align:center;padding:25px}
+.tryon-overlay span{font:120px Georgia,serif;color:#b8a27c}
+.tryon-overlay h3{font-size:clamp(36px,5vw,64px);margin:0}
+.tryon-overlay p{font-size:12px;letter-spacing:.1em;color:#d7d3cc}
+.tryon-status{position:absolute;left:20px;right:20px;bottom:20px;max-width:570px;background:#20221bbf;backdrop-filter:blur(10px);color:#fff;padding:13px 17px;font-size:12px;line-height:1.5;z-index:4}
+.tryon-controls{padding:27px;display:flex;flex-direction:column;gap:17px}
+.tryon-controlrow{display:flex;gap:10px;flex-wrap:wrap}
+.tryon-setting{display:flex;align-items:center;gap:20px;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.tryon-setting input[type=range]{flex:1;max-width:280px;accent-color:#a58f66}
+.tryon-setting select{padding:10px;border:1px solid #bcb4a6;background:transparent}
+.tryon-disclaimer,.tryon-hint{font-size:11px;line-height:1.7;color:#68655d;max-width:750px;margin:0}
+.tryon-hint{color:#896937}
+.ar-native{display:grid;grid-template-columns:1fr 1fr;gap:50px;align-items:center;max-width:940px;margin:100px auto}
+.ar-native h2{font-size:clamp(45px,5vw,75px);line-height:1.05;margin:20px 0}
+.ar-native p{font-size:13px;line-height:1.9;color:var(--muted)}
+.ar-native-view{height:430px;background:#e6ded1}
+.ar-unavailable{max-width:940px;margin:auto;text-align:center;background:#eee7db;padding:75px 30px}
+.ar-unavailable h2{font-size:40px}
+@media(max-width:650px){.ar-page{padding-top:30px}.ar-page-heading{margin-bottom:25px}.ar-page-heading h1{font-size:55px}.tryon-viewport{height:56vh;min-height:350px}.tryon-controls{padding:17px}.tryon-controls .btn{flex:1}.tryon-setting{flex-wrap:wrap;gap:8px}.ar-native{grid-template-columns:1fr;margin:60px auto}.ar-native-view{height:350px}}
