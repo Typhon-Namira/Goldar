@@ -76,8 +76,12 @@ export default function HandTryOn({product}:{product:Product}){
    const minAxis=dims.indexOf(Math.min(...dims));
    const holeAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][minAxis];
    const holeToY=new THREE.Quaternion().setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
-   const jewelry=new THREE.Group();\n   jewelry.add(model);\n   jewelry.quaternion.copy(holeToY);\n   const ringSpan=Math.max(...dims.filter((_,i)=>i!==minAxis),.00001);
-   anchor.add(jewelry);\n   const occluder=new THREE.Mesh(
+   const jewelry=new THREE.Group();
+   jewelry.add(model);
+   jewelry.quaternion.copy(holeToY);
+   const ringSpan=Math.max(...dims.filter((_,i)=>i!==minAxis),.00001);
+   anchor.add(jewelry);
+   const occluder=new THREE.Mesh(
      new THREE.CylinderGeometry(.44,.44,1.6,20,1,true),
      new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.DoubleSide})
    );
@@ -86,7 +90,10 @@ export default function HandTryOn({product}:{product:Product}){
    model.traverse(o=>{if(o instanceof THREE.Mesh)o.renderOrder=2});
    anchor.add(occluder);
    const modelDiameter=ringSpan;
-   let raf=0,lastTimestamp=-1,previous=0,seen=0;\n   const poseQuat=new THREE.Quaternion();\n   const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();\n   const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
+   let raf=0,lastTimestamp=-1,previous=0,seen=0;
+   const poseQuat=new THREE.Quaternion();
+   const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();
+   const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
    const cameraAspect=()=>({w:canvas.clientWidth,h:canvas.clientHeight});
    const toScreen=(pt:Point)=>{
      const {w,h}=cameraAspect();const vw=video.videoWidth||w,vh=video.videoHeight||h;
