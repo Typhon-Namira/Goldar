@@ -133,3 +133,8 @@
 .ar-unavailable{max-width:940px;margin:auto;text-align:center;background:#eee7db;padding:75px 30px}
 .ar-unavailable h2{font-size:40px}
 @media(max-width:650px){.ar-page{padding-top:30px}.ar-page-heading{margin-bottom:25px}.ar-page-heading h1{font-size:55px}.tryon-viewport{height:56vh;min-height:350px}.tryon-controls{padding:17px}.tryon-controls .btn{flex:1}.tryon-setting{flex-wrap:wrap;gap:8px}.ar-native{grid-template-columns:1fr;margin:60px auto}.ar-native-view{height:350px}}
+
+
+.viewer-state,.viewer-error{position:absolute;left:14px;right:14px;bottom:14px;padding:15px 18px;background:#f8f5eeed;color:#423b2d;font-size:12px;line-height:1.6;z-index:3}
+.viewer-error{background:#fff1e8;border:1px solid #d9a68e}.viewer-error p{margin:0 0 9px}.viewer-error a{text-decoration:underline;text-underline-offset:3px}
+.viewer-empty small{display:block;max-width:320px;line-height:1.8;padding:0 16px;font-size:12px}
