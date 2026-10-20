@@ -30,7 +30,7 @@ export default function ModelViewer({glb,usdz,alt="Jewelry",ar=false,poster,clas
  },[registered,glb]);
  if(!glb)return <div className={"viewer-empty "+className}><span>◇</span><p>3D model not attached</p><small>Provide a public HTTPS GLB URL in the product editor.</small></div>;
  return <div className={"viewer-wrap "+className}>
-  {registered&&<model-viewer key={glb} ref={ref} src={glb} ios-src={usdz||undefined} poster={poster||undefined} alt={alt} camera-controls="" auto-rotate="" environment-image="neutral" shadow-intensity="0.8" exposure="1.2" interaction-prompt="auto" ar={ar?"":undefined} ar-modes="webxr scene-viewer quick-look" style={{display:"block",width:"100%",height:"100%",background:"transparent"}}/>}
+  {registered&&<model-viewer ref={ref} src={glb} ios-src={usdz||undefined} poster={poster||undefined} alt={alt} camera-controls="" auto-rotate="" environment-image="neutral" shadow-intensity="0.8" exposure="1.2" interaction-prompt="auto" ar={ar?"":undefined} ar-modes="webxr scene-viewer quick-look" style={{display:"block",width:"100%",height:"100%",background:"transparent"}}/>}
   {state==="loading"&&<div className="viewer-state" role="status">LOADING 3D JEWELRY…</div>}
   {state==="error"&&<div className="viewer-error" role="alert"><p>{reason}</p><a href={glb} target="_blank" rel="noopener noreferrer">Open model URL ↗</a></div>}
   {state==="ready"&&<div className="viewer-caption">DRAG TO ROTATE · PINCH TO ZOOM</div>}
