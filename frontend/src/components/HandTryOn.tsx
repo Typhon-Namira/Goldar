@@ -64,10 +64,15 @@ export default function HandTryOn({product}:{product:Product}){
    if(generation!==sessionRef.current){hand.close();return}
    const scene=new THREE.Scene();
    scene.add(new THREE.AmbientLight(0xffffff,2.5));
-   const light=new THREE.DirectionalLight(0xffefda,3.2);light.position.set(3,6,8);scene.add(light);
+   const light=new THREE.DirectionalLight(0xffefda,2.0);light.position.set(3,6,8);scene.add(light);
+   const fill=new THREE.DirectionalLight(0xffffff,1.1);fill.position.set(-4,3,5);scene.add(fill);
    const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true,powerPreference:"low-power"});
    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
    renderer.outputColorSpace=THREE.SRGBColorSpace;
+   renderer.toneMapping=THREE.ACESFilmicToneMapping;
+   renderer.toneMappingExposure=1.2;
+   // Orthographic pixel-space overlay intentionally matches the video projection.
+   // A metrically accurate perspective camera requires device intrinsics unavailable to ordinary mobile web pages.
    const camera=new THREE.OrthographicCamera(-1,1,1,-1,.1,100);
    camera.position.set(0,0,20);camera.lookAt(0,0,0);
    const anchor=new THREE.Group();scene.add(anchor);
@@ -174,16 +179,23 @@ export default function HandTryOn({product}:{product:Product}){
      shader.uniforms.handMask={value:maskTexture};
      shader.uniforms.maskEnabled={value:0.0};
      shader.uniforms.screenSize={value:new THREE.Vector2(1,1)};
-     shader.fragmentShader="uniform sampler2D handMask;\nuniform float maskEnabled;\nuniform vec2 screenSize;\n"+shader.fragmentShader;
+     shader.fragmentShader="uniform sampler2D handMask;
+uniform float maskEnabled;
+uniform vec2 screenSize;
+"+shader.fragmentShader;
      shader.fragmentShader=shader.fragmentShader.replace(
        "#include <clipping_planes_fragment>",
-       "#include <clipping_planes_fragment>\n if(maskEnabled>0.5){ vec2 xy=gl_FragCoord.xy / screenSize; if(texture2D(handMask,vec2(xy.x,1.0-xy.y)).r<0.45) discard; }"
+       "#include <clipping_planes_fragment>
+ if(maskEnabled>0.5){ vec2 xy=gl_FragCoord.xy / screenSize; if(texture2D(handMask,vec2(xy.x,1.0-xy.y)).r<0.45) discard; }"
      );
      (occlusionMat.userData as {shader?:typeof shader}).shader=shader;
    };
    fingerCore.renderOrder=-1;
    anchor.add(fingerCore);
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
+   let lostAt=0;
+   const lastValidPosition=new THREE.Vector3();
+   const lastValidQuaternion=new THREE.Quaternion();
    let maskFailure=false;
    const maskImage=document.createElement("canvas");
    maskImage.width=256;maskImage.height=256;
@@ -227,7 +239,14 @@ export default function HandTryOn({product}:{product:Product}){
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
      // Anatomical calibration: palm breadth approximates proximal finger breadth.
      // User-adjustable correction is visual, not an ISO ring-size measurement.
-     const fingerWidth=Math.max(11,palmWidth*(product.category==="ring"?.225:.55)*calibration);
+     // Use neighbors at the MCP plane as the local finger width reference.
+     // Palm width is a fallback because 21 landmarks cannot measure skin contours.
+     const adjacency:Record<string,[number,number]>={index:[5,9],middle:[5,13],ring:[9,17],pinky:[13,17]};
+     const neighbors=adjacency[finger];
+     const neighborA=toScreen(points[neighbors[0]]),neighborB=toScreen(points[neighbors[1]]);
+     const adjacentSeparation=Math.hypot(neighborA.x-neighborB.x,neighborA.y-neighborB.y);
+     const widthEstimate=product.category==="ring"?Math.min(palmWidth*.29,Math.max(palmWidth*.16,adjacentSeparation*.68)):palmWidth*.55;
+     const fingerWidth=Math.max(11,widthEstimate*calibration);
      const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1);
      const world=(detected.worldLandmarks?.[0]||points) as Point[];
      const a=worldV(world[idx[0]]),b=worldV(world[idx[1]]);
@@ -243,17 +262,21 @@ export default function HandTryOn({product}:{product:Product}){
      vx.crossVectors(vy,vz).normalize();
      basis.makeBasis(vx,vy,vz);
      poseQuat.setFromRotationMatrix(basis);
-     if(!Number.isFinite(targetScale)||targetScale<=0||!Number.isFinite(poseQuat.w)){
+     if(!Number.isFinite(targetScale)||targetScale<=0||!Number.isFinite(poseQuat.w)||vy.lengthSq()<.5||vz.lengthSq()<.5){
        anchor.visible=false;renderer.render(scene,camera);return;
      }
      const position=new THREE.Vector3(x-w/2,h/2-y,0);
      const seconds=lastPoseTime?Math.min(.1,(time-lastPoseTime)/1000):.033;
      lastPoseTime=time;
+     // Reject implausible single-frame landmark jumps instead of snapping jewelry away.
      const displacement=initialized?position.distanceTo(smoothPosition):0;
+     if(initialized&&displacement>Math.max(w,h)*.40){anchor.visible=false;renderer.render(scene,camera);return;}
      const positionGain=initialized?Math.min(.82,1-Math.exp(-seconds*(8+displacement*.06))):1;
      const rotationGain=initialized?1-Math.exp(-seconds*10):1;
      const sizeGain=initialized?1-Math.exp(-seconds*7):1;
      smoothPosition.lerp(position,positionGain);
+     // Canonicalize quaternion sign to avoid interpolation across the long arc.
+     if(initialized&&smoothQuaternion.dot(poseQuat)<0){poseQuat.set(-poseQuat.x,-poseQuat.y,-poseQuat.z,-poseQuat.w)}
      smoothQuaternion.slerp(poseQuat,rotationGain);
      anchor.position.copy(smoothPosition);
      anchor.quaternion.copy(smoothQuaternion);
