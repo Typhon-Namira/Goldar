@@ -70,9 +70,25 @@ export default function HandTryOn({product}:{product:Product}){
    const size=new THREE.Vector3();bounds.getSize(size);
    const center=new THREE.Vector3();bounds.getCenter(center);
    model.position.sub(center);
+   // Align the thinnest model dimension with the finger direction.
+   // For a ring-shaped asset, this is normally the axis through the hole.
+   const dims=[size.x,size.y,size.z];
+   const minAxis=dims.indexOf(Math.min(...dims));
+   const holeAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][minAxis];
+   const holeToY=new THREE.Quaternion().setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
+   model.quaternion.copy(holeToY);
+   const ringSpan=Math.max(...dims.filter((_,i)=>i!==minAxis),.00001);
    anchor.add(model);
-   const modelDiameter=Math.max(size.x,size.y,size.z,.00001);
-   let raf=0,lastTimestamp=-1,previous=0,seen=0;
+   const occluder=new THREE.Mesh(
+     new THREE.CylinderGeometry(.44,.44,1.6,20,1,true),
+     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.DoubleSide})
+   );
+   // Draw the invisible approximate finger depth before the ring.
+   occluder.renderOrder=1;
+   model.traverse(o=>{if(o instanceof THREE.Mesh)o.renderOrder=2});
+   anchor.add(occluder);
+   const modelDiameter=ringSpan;
+   let raf=0,lastTimestamp=-1,previous=0,seen=0;\n   const poseQuat=new THREE.Quaternion();\n   const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();\n   const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
    const cameraAspect=()=>({w:canvas.clientWidth,h:canvas.clientHeight});
    const toScreen=(pt:Point)=>{
      const {w,h}=cameraAspect();const vw=video.videoWidth||w,vh=video.videoHeight||h;
@@ -103,18 +119,40 @@ export default function HandTryOn({product}:{product:Product}){
      const base=toScreen(points[idx[0]]),tip=toScreen(points[idx[1]]);
      const dx=tip.x-base.x,dy=tip.y-base.y;
      const len=Math.max(5,Math.hypot(dx,dy));
-     const x=product.category==="ring"?lerp(base.x,tip.x,.36):base.x-(tip.x-base.x)*.13;
-     const y=product.category==="ring"?lerp(base.y,tip.y,.36):base.y-(tip.y-base.y)*.13;
-     const width=product.category==="ring"?len*.95:Math.max(24,len*1.1);
-     const targetScale=(width/modelDiameter)*fit*(product.scale||1);
-     // Video coordinates are screen coordinates; flip only when mirrored in CSS.
-     const targetAngle=Math.atan2(-dy,dx)-Math.PI/2;
-     const follow=anchor.userData.initialized?.28:1;
-     anchor.position.x=lerp(anchor.position.x,x-w/2,follow);
-     anchor.position.y=lerp(anchor.position.y,h/2-y,follow);
-     anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,follow));
-     anchor.rotation.z=lerp(anchor.rotation.z,targetAngle,follow);
-     anchor.userData.initialized=true;
+     const x=product.category==="ring"?lerp(base.x,tip.x,.33):lerp(base.x,tip.x,-.12);
+     const y=product.category==="ring"?lerp(base.y,tip.y,.33):lerp(base.y,tip.y,-.12);
+       const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
+     const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
+     // The metacarpal span estimates finger diameter more reliably than bone length.
+     const fingerWidth=product.category==="ring"?Math.max(13,palmWidth*.235):Math.max(25,palmWidth*.58);
+     const targetScale= fingerWidth/modelDiameter*fit*(product.scale||1)*1.13;
+     // Build a stable local finger frame in camera coordinates.
+     vy.set(dx,-dy,(points[idx[1]].z-points[idx[0]].z)*Math.max(w,h)*.60).normalize();
+     vx.set(indexBase.x-pinkyBase.x,pinkyBase.y-indexBase.y,
+       (points[5].z-points[17].z)*Math.max(w,h)*.5).normalize();
+     vx.addScaledVector(vy,-vx.dot(vy)).normalize();
+     if(vx.lengthSq()<.01)vx.set(1,0,0);
+     vz.crossVectors(vx,vy).normalize();
+     // Keep the front of the ring oriented toward the camera.
+     if(vz.z<0){vx.negate();vz.negate()}
+     vx.crossVectors(vy,vz).normalize();
+     basis.makeBasis(vx,vy,vz);
+     poseQuat.setFromRotationMatrix(basis);
+     const position=new THREE.Vector3(x-w/2,h/2-y,0);
+     const motion=Math.hypot(position.x-smoothPosition.x,position.y-smoothPosition.y);
+     const positionGain=initialized?Math.min(.78,Math.max(.16,.16+motion*.018)):1;
+     const rotationGain=initialized?.22:1;
+     smoothPosition.lerp(position,positionGain);
+     smoothQuaternion.slerp(poseQuat,rotationGain);
+     anchor.position.copy(smoothPosition);
+     anchor.quaternion.copy(smoothQuaternion);
+     const scaleGain=initialized?.19:1;
+     anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,scaleGain));
+     // Slightly smaller than the visual ring diameter to avoid covering the gem.
+     occluder.scale.set(.64,.8,.64);
+     // Behind the front surface of the jewelry, while hiding its rear arc.
+     occluder.position.z=-.13*modelDiameter;
+     initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
    };
