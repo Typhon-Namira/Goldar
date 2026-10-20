@@ -76,10 +76,8 @@ export default function HandTryOn({product}:{product:Product}){
    const minAxis=dims.indexOf(Math.min(...dims));
    const holeAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][minAxis];
    const holeToY=new THREE.Quaternion().setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
-   model.quaternion.copy(holeToY);
-   const ringSpan=Math.max(...dims.filter((_,i)=>i!==minAxis),.00001);
-   anchor.add(model);
-   const occluder=new THREE.Mesh(
+   const jewelry=new THREE.Group();\n   jewelry.add(model);\n   jewelry.quaternion.copy(holeToY);\n   const ringSpan=Math.max(...dims.filter((_,i)=>i!==minAxis),.00001);
+   anchor.add(jewelry);\n   const occluder=new THREE.Mesh(
      new THREE.CylinderGeometry(.44,.44,1.6,20,1,true),
      new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.DoubleSide})
    );
@@ -118,8 +116,7 @@ export default function HandTryOn({product}:{product:Product}){
      const idx=product.category==="ring"?fingerBases[finger]:[0,9];
      const base=toScreen(points[idx[0]]),tip=toScreen(points[idx[1]]);
      const dx=tip.x-base.x,dy=tip.y-base.y;
-     const len=Math.max(5,Math.hypot(dx,dy));
-     const x=product.category==="ring"?lerp(base.x,tip.x,.33):lerp(base.x,tip.x,-.12);
+       const x=product.category==="ring"?lerp(base.x,tip.x,.33):lerp(base.x,tip.x,-.12);
      const y=product.category==="ring"?lerp(base.y,tip.y,.33):lerp(base.y,tip.y,-.12);
        const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
