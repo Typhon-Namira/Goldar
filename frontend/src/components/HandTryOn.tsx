@@ -7,6 +7,7 @@ type Phase="idle"|"loading"|"active"|"not-found"|"error";
 type Category="ring"|"bracelet";
 type Point={x:number;y:number;z:number};
 const MODEL_BASE="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const SEGMENT_MODEL="https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite";
 const WASM_BASE="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm";
 
 export default function HandTryOn({product}:{product:Product}){
@@ -84,6 +85,30 @@ export default function HandTryOn({product}:{product:Product}){
    modelPivot.quaternion.setFromUnitVectors(holeAxis,new THREE.Vector3(0,1,0));
    anchor.add(modelPivot);
    const modelDiameter=Math.max(...dims.filter((_,i)=>i!==minAxis),1e-5);
+   // Segmentation is optional and never blocks the core tracking pipeline.
+   // Pixelwise person segmentation is intersected with the tracked finger ROI.
+   const maskCanvas=document.createElement("canvas");
+   maskCanvas.width=256;maskCanvas.height=256;
+   const maskCtx=maskCanvas.getContext("2d",{willReadFrequently:true});
+   const maskTexture=new THREE.CanvasTexture(maskCanvas);
+   maskTexture.minFilter=THREE.LinearFilter;
+   maskTexture.magFilter=THREE.LinearFilter;
+   maskTexture.flipY=false;
+   let segmenter:import("@mediapipe/tasks-vision").ImageSegmenter|null=null;
+   let segmentEnabled=false,segmentLast=0;
+   let segmentationReady=false;
+   void (async()=>{
+     try{
+       const {ImageSegmenter}=await import("@mediapipe/tasks-vision");
+       const vision=await FilesetResolver.forVisionTasks(WASM_BASE);
+       const created=await ImageSegmenter.createFromOptions(vision,{
+         baseOptions:{modelAssetPath:SEGMENT_MODEL,delegate:"CPU"},
+         runningMode:"VIDEO",outputCategoryMask:true,outputConfidenceMasks:false
+       });
+       if(generation!==sessionRef.current){created.close();return}
+       segmenter=created;segmentEnabled=true;
+     }catch(e){console.warn("Optional segmentation unavailable; using geometric occlusion",e)}
+   })();
    // The depth-only capsule approximates the proximal phalanx in camera space.
    // Its radius is calibrated per frame; it MUST remain smaller than the ring.
    // This is geometric depth occlusion, not image segmentation.
@@ -91,9 +116,25 @@ export default function HandTryOn({product}:{product:Product}){
      new THREE.CylinderGeometry(.36,.36,1.6,32,1,false),
      new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.FrontSide})
    );
+   const occlusionMat=fingerCore.material as import("three").MeshBasicMaterial;
+   occlusionMat.onBeforeCompile=(shader)=>{
+     shader.uniforms.handMask={value:maskTexture};
+     shader.uniforms.maskEnabled={value:0.0};
+     shader.uniforms.screenSize={value:new THREE.Vector2(1,1)};
+     shader.fragmentShader="uniform sampler2D handMask;\nuniform float maskEnabled;\nuniform vec2 screenSize;\n"+shader.fragmentShader;
+     shader.fragmentShader=shader.fragmentShader.replace(
+       "#include <clipping_planes_fragment>",
+       "#include <clipping_planes_fragment>\n if(maskEnabled>0.5){ vec2 xy=gl_FragCoord.xy / screenSize; if(texture2D(handMask,vec2(xy.x,1.0-xy.y)).r<0.45) discard; }"
+     );
+     (occlusionMat.userData as {shader?:typeof shader}).shader=shader;
+   };
    fingerCore.renderOrder=-1;
    anchor.add(fingerCore);
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
+   let maskFailure=false;
+   const maskImage=document.createElement("canvas");
+   maskImage.width=256;maskImage.height=256;
+   const maskImageCtx=maskImage.getContext("2d",{willReadFrequently:true});
    const poseQuat=new THREE.Quaternion();
    const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();
    const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
@@ -167,6 +208,51 @@ export default function HandTryOn({product}:{product:Product}){
      // Calibrated model-space core: front surface sits behind the front gem.
      // It writes depth only, hiding rear-facing band sections.
      fingerCore.visible=occlusion&&product.category==="ring";
+     // Run segmentation at 8 FPS; landmark inference remains at camera cadence.
+     if(segmentEnabled&&segmenter&&maskCtx&&maskImageCtx&&time-segmentLast>125){
+       segmentLast=time;
+       try{
+         const result=segmenter.segmentForVideo(video,time);
+         const category=result.categoryMask;
+         if(category){
+           const sw=category.width,sh=category.height;
+           const raw=category.getAsUint8Array();
+           maskImage.width=sw;maskImage.height=sh;
+           const c=maskImage.getContext("2d",{willReadFrequently:true});
+           if(c){
+             const img=c.createImageData(sw,sh);
+             for(let i=0;i<raw.length;i++){const v=raw[i]===1?255:0;const k=i*4;img.data[k]=v;img.data[k+1]=v;img.data[k+2]=v;img.data[k+3]=255}
+             c.putImageData(img,0,0);
+             maskCtx.clearRect(0,0,256,256);
+             // Landmark-aligned ROI limits person segmentation to the tracked hand.
+             const vw=video.videoWidth||1,vh=video.videoHeight||1;
+             const cover=Math.max(w/vw,h/vh);
+             const vwScreen=vw*cover,vhScreen=vh*cover;
+             const originX=(w-vwScreen)/2,originY=(h-vhScreen)/2;
+             maskCtx.drawImage(maskImage,originX/w*256,originY/h*256,vwScreen/w*256,vhScreen/h*256);
+             maskCtx.globalCompositeOperation="destination-in";
+             maskCtx.fillStyle="#fff";
+             const x1=base.x/w*256,y1=base.y/h*256,x2=tip.x/w*256,y2=tip.y/h*256;
+             maskCtx.beginPath();maskCtx.lineCap="round";maskCtx.lineJoin="round";
+             maskCtx.moveTo(x1,y1);maskCtx.lineTo(x2,y2);
+             maskCtx.lineWidth=Math.max(8,fingerWidth/w*256*1.8);
+             maskCtx.stroke();
+             maskCtx.globalCompositeOperation="source-over";
+             maskTexture.needsUpdate=true;
+             segmentationReady=true;
+           }
+         }
+         result.close();
+       }catch(err){
+         if(!maskFailure){console.warn("Segmentation disabled after runtime error",err);maskFailure=true}
+         segmentEnabled=false;segmentationReady=false;
+       }
+     }
+     const shader=(occlusionMat.userData as {shader?:{uniforms:Record<string,{value:unknown}>}}).shader;
+     if(shader){
+       shader.uniforms.maskEnabled.value=segmentationReady?1.0:0.0;
+       (shader.uniforms.screenSize.value as import("three").Vector2).set(canvas.width,canvas.height);
+     }
      fingerCore.scale.set(.72,.95,.72);
      fingerCore.position.set(0,0,-.16);
      initialized=true;
@@ -174,7 +260,7 @@ export default function HandTryOn({product}:{product:Product}){
      renderer.render(scene,camera);
    };
    cleanRef.current=()=>{
-     cancelAnimationFrame(raf);hand.close();renderer.dispose();
+     cancelAnimationFrame(raf);hand.close();segmenter?.close();maskTexture.dispose();renderer.dispose();
      scene.traverse(o=>{if(o instanceof THREE.Mesh){
        o.geometry?.dispose();const materials=Array.isArray(o.material)?o.material:[o.material];
        materials.forEach(m=>m?.dispose())}});
