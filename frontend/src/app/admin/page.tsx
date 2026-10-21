@@ -3,6 +3,7 @@ import {useEffect,useState} from "react";import Link from "next/link";import {re
 const emptyStore={name:"",slug:"",tagline:"",description:"",logo_url:"",cover_url:"",theme:"ivory",contact_url:"",published:true};
 const emptyProduct={name:"",slug:"",description:"",category:"ring",metal:"",weight_grams:null as number|null,size_label:"",cover_url:"",glb_url:"",usdz_url:"",scale:1,ar_enabled:true,published:true};
 export default function Admin(){
+ const [ringConfig,setRingConfig]=useState<RingCalibrationConfig>({fitMultiplier:1,anchorFraction:.22});
  const [token,setToken]=useState("");const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [stores,setStores]=useState<Store[]>([]);const [selected,setSelected]=useState<Store|null>(null);const [products,setProducts]=useState<Product[]>([]);
  const [storeForm,setStoreForm]=useState({...emptyStore});const [productForm,setProductForm]=useState({...emptyProduct});const [editStore,setEditStore]=useState<string|null>(null);const [editProduct,setEditProduct]=useState<string|null>(null);
  const [mode,setMode]=useState<"stores"|"store"|"product">("stores");const [loading,setLoading]=useState(false);const [message,setMessage]=useState("");const [error,setError]=useState("");
