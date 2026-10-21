@@ -3,7 +3,7 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
 import {estimateFingerFrame,PoseSmoother,type HandSide,type PalmView} from "@/lib/handPose";
-import {computeRingTransform} from "@/lib/ringTransform";
+import {solveCameraRingPose} from "@/lib/cameraRingGeometry";
 import {createFingerOccluder,resizeFingerOccluder} from "@/lib/fingerOcclusion";
 import {inspectRingGeometry,attachCalibratedRing,type RingCalibrationOverride} from "@/lib/ringCalibration";
 
@@ -211,18 +211,20 @@ uniform vec2 screenSize;
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      const frame=estimateFingerFrame(world,finger,side,poseFilter.ready?poseFilter.rotation:undefined);
      if(!frame){anchor.visible=poseFilter.hold(time);renderer.render(scene,camera);return}
-     const frameTransform=product.category==="ring"?computeRingTransform({
-       landmarks:points,finger,frame,toScreen,viewportWidth:w,viewportHeight:h,
-       innerDiameter:modelDiameter,
-       fitRatio:product.ring_calibration?.anchorFraction??.22,
-       sizeMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
+     const solved=product.category==="ring"?solveCameraRingPose({
+       landmarks:points,finger,toScreen,width:w,height:h,holeDiameter:modelDiameter,
+       anchorFraction:product.ring_calibration?.anchorFraction??.22,
+       fitMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
        widthCalibration:calibration,
      }):null;
+     if(product.category==="ring"&&!solved){
+       anchor.visible=poseFilter.hold(time);renderer.render(scene,camera);return;
+     }
      const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
-     const fingerWidth=frameTransform?.fingerWidthPx??palmWidth*.55*calibration;
-     const targetScale=frameTransform?.scale??fingerWidth/modelDiameter*fit*(product.scale||1);
-     poseQuat.copy(frameTransform?.rotation??frame.quaternion);
+     const fingerWidth=solved?.fingerWidthPx??palmWidth*.55*calibration;
+     const targetScale=solved?.scale??fingerWidth/modelDiameter*fit*(product.scale||1);
+     poseQuat.copy(solved?.quaternion??frame.quaternion);
      if(time-latestTelemetry>450){
        const period=latestTelemetry?time-latestTelemetry:450;
        setTrackingInfo({side:frame.handSide,view:frame.view,confidence:frame.confidence,fps:Math.round(telemetryFrames*1000/Math.max(1,period))});
@@ -231,7 +233,7 @@ uniform vec2 screenSize;
      if(!Number.isFinite(targetScale)||targetScale<=0){
        anchor.visible=poseFilter.hold(time);renderer.render(scene,camera);return;
      }
-     const position=frameTransform?.center??new THREE.Vector3(x-w/2,h/2-y,0);
+     const position=solved?.position??new THREE.Vector3(x-w/2,h/2-y,0);
      if(!poseFilter.update(position,poseQuat,targetScale,time)){
        anchor.visible=false;renderer.render(scene,camera);return;
      }
