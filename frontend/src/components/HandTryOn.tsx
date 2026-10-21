@@ -25,7 +25,7 @@ export default function HandTryOn({product}:{product:Product}){
  const [fit,setFit]=useState(1);
  const [occlusion,setOcclusion]=useState(true);
  const [calibration,setCalibration]=useState(1);
- const [trackingInfo,setTrackingInfo]=useState<{side:HandSide;view:PalmView;confidence:number}|null>(null);
+ const [trackingInfo,setTrackingInfo]=useState<{side:HandSide;view:PalmView;confidence:number;fps:number}|null>(null);
  const supported=product.category==="ring"||product.category==="bracelet";
  const stop=useCallback(()=>{
    sessionRef.current+=1;
@@ -159,6 +159,7 @@ uniform vec2 screenSize;
    let lostAt=0;
    const poseFilter=new PoseSmoother();
    let latestTelemetry=0;
+   let telemetryFrames=0;
    const lastValidPosition=new THREE.Vector3();
    const lastValidQuaternion=new THREE.Quaternion();
    let maskFailure=false;
@@ -187,6 +188,7 @@ uniform vec2 screenSize;
        renderer.setSize(w,h,false);camera.left=-w/2;camera.right=w/2;camera.top=h/2;camera.bottom=-h/2;camera.updateProjectionMatrix();
      }
      if(time-previous<33)return;previous=time;
+     telemetryFrames+=1;
      if(video.readyState<2)return;
      if(video.currentTime===lastTimestamp)return;lastTimestamp=video.currentTime;
      const detected=hand.detectForVideo(video,time);
@@ -221,8 +223,9 @@ uniform vec2 screenSize;
      if(!pose){anchor.visible=false;renderer.render(scene,camera);return}
      poseQuat.copy(pose.quaternion);
      if(time-latestTelemetry>450){
-       setTrackingInfo({side:pose.handSide,view:pose.view,confidence:pose.confidence});
-       latestTelemetry=time;
+       const period=latestTelemetry?time-latestTelemetry:450;
+       setTrackingInfo({side:pose.handSide,view:pose.view,confidence:pose.confidence,fps:Math.round(telemetryFrames*1000/Math.max(1,period))});
+       telemetryFrames=0;latestTelemetry=time;
      }
      if(!Number.isFinite(targetScale)||targetScale<=0){
        anchor.visible=false;renderer.render(scene,camera);return;
