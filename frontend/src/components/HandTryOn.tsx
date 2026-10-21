@@ -215,7 +215,7 @@ uniform vec2 screenSize;
        landmarks:points,finger,toScreen,width:w,height:h,holeDiameter:modelDiameter,
        anchorFraction:product.ring_calibration?.anchorFraction??.22,
        fitMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
-       widthCalibration:calibration,
+       widthCalibration:calibration,reportedSide:side,cameraFacing:facing,
      }):null;
      if(product.category==="ring"&&!solved){
        anchor.visible=poseFilter.hold(time);renderer.render(scene,camera);return;
