@@ -217,6 +217,7 @@ uniform vec2 screenSize;
        fitRatio:product.ring_calibration?.anchorFraction??.22,
        sizeMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
        widthCalibration:calibration,
+       depthPixelsPerUnit:Math.max(w,h),
      }):null;
      const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
