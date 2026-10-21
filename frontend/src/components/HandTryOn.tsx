@@ -2,7 +2,8 @@
 
 import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
-import {estimateFingerPose,PoseSmoother,type HandSide,type PalmView} from "@/lib/handPose";
+import {estimateFingerFrame,PoseSmoother,type HandSide,type PalmView} from "@/lib/handPose";
+import {computeRingTransform} from "@/lib/ringTransform";
 import {inspectRingGeometry,attachCalibratedRing,type RingCalibrationOverride} from "@/lib/ringCalibration";
 
 type Phase="idle"|"loading"|"active"|"not-found"|"error";
@@ -202,35 +203,32 @@ uniform vec2 screenSize;
      const base=toScreen(points[idx[0]]),tip=toScreen(points[idx[1]]);
      const x=lerp(base.x,tip.x,product.category==="ring"?(product.ring_calibration?.anchorFraction??.22):-.12);
      const y=lerp(base.y,tip.y,product.category==="ring"?(product.ring_calibration?.anchorFraction??.22):-.12);
-     const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
-     const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
-     // Anatomical calibration: palm breadth approximates proximal finger breadth.
-     // User-adjustable correction is visual, not an ISO ring-size measurement.
-     // Use neighbors at the MCP plane as the local finger width reference.
-     // Palm width is a fallback because 21 landmarks cannot measure skin contours.
-     const adjacency:Record<string,[number,number]>={index:[5,9],middle:[5,13],ring:[9,17],pinky:[13,17]};
-     const neighbors=adjacency[finger];
-     const neighborA=toScreen(points[neighbors[0]]),neighborB=toScreen(points[neighbors[1]]);
-     const adjacentSeparation=Math.hypot(neighborA.x-neighborB.x,neighborA.y-neighborB.y);
-     const widthEstimate=product.category==="ring"?Math.min(palmWidth*.29,Math.max(palmWidth*.16,adjacentSeparation*.68)):palmWidth*.55;
-     const fingerWidth=Math.max(11,widthEstimate*calibration);
-     // Fit by measured hole diameter, rather than external geometry diameter.
-     const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1);
      const world=(detected.worldLandmarks?.[0]||points) as Point[];
      const label=detected.handedness?.[0]?.[0]?.categoryName;
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
-     const pose=estimateFingerPose(world,finger,side,poseFilter.ready?poseFilter.rotation:undefined);
-     if(!pose){anchor.visible=false;renderer.render(scene,camera);return}
-     poseQuat.copy(pose.quaternion);
+     const frame=estimateFingerFrame(world,finger,side,poseFilter.ready?poseFilter.rotation:undefined);
+     if(!frame){anchor.visible=false;renderer.render(scene,camera);return}
+     const frameTransform=product.category==="ring"?computeRingTransform({
+       landmarks:points,finger,frame,toScreen,viewportWidth:w,viewportHeight:h,
+       innerDiameter:modelDiameter,
+       fitRatio:product.ring_calibration?.anchorFraction??.22,
+       sizeMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
+       widthCalibration:calibration,
+     }):null;
+     const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
+     const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
+     const fingerWidth=frameTransform?.fingerWidthPx??palmWidth*.55*calibration;
+     const targetScale=frameTransform?.scale??fingerWidth/modelDiameter*fit*(product.scale||1);
+     poseQuat.copy(frameTransform?.rotation??frame.quaternion);
      if(time-latestTelemetry>450){
        const period=latestTelemetry?time-latestTelemetry:450;
-       setTrackingInfo({side:pose.handSide,view:pose.view,confidence:pose.confidence,fps:Math.round(telemetryFrames*1000/Math.max(1,period))});
+       setTrackingInfo({side:frame.handSide,view:frame.view,confidence:frame.confidence,fps:Math.round(telemetryFrames*1000/Math.max(1,period))});
        telemetryFrames=0;latestTelemetry=time;
      }
      if(!Number.isFinite(targetScale)||targetScale<=0){
        anchor.visible=false;renderer.render(scene,camera);return;
      }
-     const position=new THREE.Vector3(x-w/2,h/2-y,0);
+     const position=frameTransform?.center??new THREE.Vector3(x-w/2,h/2-y,0);
      if(!poseFilter.update(position,poseQuat,targetScale,time)){
        anchor.visible=false;renderer.render(scene,camera);return;
      }
