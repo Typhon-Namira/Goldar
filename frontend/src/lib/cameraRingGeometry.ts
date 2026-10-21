@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type {FingerName, HandPoint} from "./handPose";
+import type {FingerName, HandPoint, HandSide} from "./handPose";
 
 /**
  * Camera-space ring solver. Every axis and the anchor use the same projected
@@ -38,6 +38,8 @@ export function solveCameraRingPose(input:{
   widthCalibration:number;
   /** Set to 0 to disable uncertain model-relative depth. */
   depthFactor?:number;
+  reportedSide?:HandSide;
+  cameraFacing?:"environment"|"user";
 }):CameraRingPose|null {
   const {landmarks, finger, toScreen, width,height,holeDiameter,
     anchorFraction,fitMultiplier,widthCalibration}=input;
@@ -75,10 +77,19 @@ export function solveCameraRingPose(input:{
   if(lateralSize<handBreadth*0.12)return null;
   lateral.normalize();
 
-  // The sign of the normal comes from the fixed anatomical MCP ordering, not
-  // from the camera-facing direction. Thus palm flipping won't billboard gems.
-  // Mesh calibration maps gemstone to +Z of this orthonormal frame.
+  // Index-to-pinky order defines the transverse anatomical axis. The cross
+  // product's sign also depends on hand laterality: a RIGHT dorsal-facing
+  // hand viewed by the rear camera needs the opposite sign from a LEFT one.
+  // MediaPipe's handedness is documented for mirrored selfie imagery. For
+  // ordinary unmirrored rear input, interchange the reported labels.
+  // Unknown handedness cannot reliably resolve dorsal/volar orientation.
+  const reported=input.reportedSide??"Unknown";
+  const anatomicalSide:HandSide=input.cameraFacing==="environment"
+    ?(reported==="Left"?"Right":reported==="Right"?"Left":"Unknown")
+    :reported;
+  if(anatomicalSide==="Unknown")return null;
   const dorsal=new THREE.Vector3().crossVectors(lateral,axis);
+  if(anatomicalSide==="Right") dorsal.negate();
   if(dorsal.lengthSq()<1e-8)return null;
   dorsal.normalize();
   lateral.crossVectors(axis,dorsal).normalize();
