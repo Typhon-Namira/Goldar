@@ -4,6 +4,7 @@ import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
 import {estimateFingerFrame,PoseSmoother,type HandSide,type PalmView} from "@/lib/handPose";
 import {computeRingTransform} from "@/lib/ringTransform";
+import {createFingerOccluder,resizeFingerOccluder} from "@/lib/fingerOcclusion";
 import {inspectRingGeometry,attachCalibratedRing,type RingCalibrationOverride} from "@/lib/ringCalibration";
 
 type Phase="idle"|"loading"|"active"|"not-found"|"error";
@@ -133,10 +134,7 @@ export default function HandTryOn({product}:{product:Product}){
    // The depth-only capsule approximates the proximal phalanx in camera space.
    // Its radius is calibrated per frame; it MUST remain smaller than the ring.
    // This is geometric depth occlusion, not image segmentation.
-   const fingerCore=new THREE.Mesh(
-     new THREE.CylinderGeometry(modelDiameter*.44,modelDiameter*.44,modelDiameter*1.65,48,1,false),
-     new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.FrontSide})
-   );
+   const fingerCore=createFingerOccluder(modelDiameter);
    const occlusionMat=fingerCore.material as import("three").MeshBasicMaterial;
    occlusionMat.onBeforeCompile=(shader)=>{
      shader.uniforms.handMask={value:maskTexture};
@@ -288,8 +286,7 @@ uniform vec2 screenSize;
        shader.uniforms.maskEnabled.value=segmentationReady&&time<maskValidUntil?1.0:0.0;
        (shader.uniforms.screenSize.value as import("three").Vector2).set(canvas.width,canvas.height);
      }
-     fingerCore.scale.set(1,1,1);
-     fingerCore.position.set(0,0,-modelDiameter*.18);
+     resizeFingerOccluder(fingerCore,fingerWidth,poseFilter.scale,modelDiameter);
      initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
