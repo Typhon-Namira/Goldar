@@ -26,7 +26,7 @@ window.addEventListener("error",ev=>{const el=document.getElementById("loading")
 window.addEventListener("unhandledrejection",ev=>{const el=document.getElementById("loading");if(el){el.textContent="AR initialization failed: "+String(ev.reason);el.className="error"}});
 </script>
 <script src="/webar-rocks/vendor/WebARRocksHand.js"></script>
-<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r131/three.min.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.131.3/build/three.min.js"></script>
 <script src="/webar-rocks/vendor/GLTFLoader.js"></script>
 <script src="/webar-rocks/vendor/HandTrackerThreeHelper.js"></script>
 <script src="/webar-rocks/vendor/OneEuroLMStabilizer.js"></script>
