@@ -149,28 +149,105 @@ export function estimateFingerPose(
   };
 }
 
-// Existing smoother retained verbatim: its replacement belongs to Phase 5.3.
-export class PoseSmoother{
- readonly position=new THREE.Vector3();
- readonly rotation=new THREE.Quaternion();
- scale=1;
- ready=false;
- lastTime=0;
- reset(){this.ready=false;this.lastTime=0;this.scale=1;this.position.set(0,0,0);this.rotation.identity()}
- update(position:THREE.Vector3,rotation:THREE.Quaternion,scale:number,time:number):boolean{
-  if(!finite(position)||!Number.isFinite(scale)||scale<=0||!Number.isFinite(rotation.w))return false;
-  if(!this.ready){this.position.copy(position);this.rotation.copy(rotation);this.scale=scale;this.ready=true;this.lastTime=time;return true}
-  const dt=Math.max(0.001,Math.min(.1,(time-this.lastTime)/1000));this.lastTime=time;
-  const distance=this.position.distanceTo(position);
-  // Reject impossible one-frame jumps rather than propagating corrupted landmarks.
-  if(distance>220){this.reset();return false}
-  const moving=Math.min(1,distance/38);
-  const posAlpha=1-Math.exp(-dt*(7+moving*16));
-  const rotAlpha=1-Math.exp(-dt*(8+moving*10));
-  const scaleAlpha=1-Math.exp(-dt*6);
-  this.position.lerp(position,posAlpha);
-  this.rotation.slerp(rotation,rotAlpha);
-  this.scale+= (scale-this.scale)*scaleAlpha;
-  return true;
- }
+/**
+ * Adaptive One Euro low-pass for vector/scalar channels.
+ * Timestamp in milliseconds. Rejection thresholds are handled by PoseSmoother.
+ */
+class OneEuroScalar {
+  private value = 0;
+  private velocity = 0;
+  private initialized = false;
+  private lastTime = 0;
+  constructor(private readonly minCutoff = 1.25,
+    private readonly beta = 0.035, private readonly derivativeCutoff = 1) {}
+  reset() { this.initialized = false; this.value = 0; this.velocity = 0; this.lastTime = 0; }
+  update(input: number, time: number) {
+    if (!Number.isFinite(input) || !Number.isFinite(time)) return NaN;
+    if (!this.initialized) {
+      this.value = input; this.lastTime = time; this.initialized = true;
+      return input;
+    }
+    if (time <= this.lastTime) return this.value;
+    const dt = THREE.MathUtils.clamp((time - this.lastTime) / 1000, 0.001, 0.1);
+    this.lastTime = time;
+    const smoothing = (cutoff: number) => {
+      const tau = 1 / (2 * Math.PI * cutoff);
+      return dt / (tau + dt);
+    };
+    const rawDerivative = (input - this.value) / dt;
+    const dAlpha = smoothing(this.derivativeCutoff);
+    this.velocity += dAlpha * (rawDerivative - this.velocity);
+    const cutoff = this.minCutoff + this.beta * Math.abs(this.velocity);
+    this.value += smoothing(cutoff) * (input - this.value);
+    return this.value;
+  }
+}
+
+export class PoseSmoother {
+  readonly position = new THREE.Vector3();
+  readonly rotation = new THREE.Quaternion();
+  scale = 1;
+  ready = false;
+  lastTime = 0;
+  lastObservation = 0;
+  private readonly px = new OneEuroScalar(1.35, 0.035);
+  private readonly py = new OneEuroScalar(1.35, 0.035);
+  private readonly pz = new OneEuroScalar(1.35, 0.035);
+  private readonly size = new OneEuroScalar(1.1, 0.025);
+
+  reset() {
+    this.ready = false;
+    this.lastTime = 0;
+    this.lastObservation = 0;
+    this.scale = 1;
+    this.position.set(0, 0, 0);
+    this.rotation.identity();
+    this.px.reset(); this.py.reset(); this.pz.reset(); this.size.reset();
+  }
+
+  /** Keep last valid pose briefly on detector dropout; do not extrapolate. */
+  hold(time: number, maxHoldMs = 320): boolean {
+    return this.ready && Number.isFinite(time) &&
+      time >= this.lastObservation && time - this.lastObservation <= maxHoldMs;
+  }
+
+  update(position: THREE.Vector3, rotation: THREE.Quaternion, scale: number, time: number): boolean {
+    if (!finite(position) || !Number.isFinite(time) ||
+      !Number.isFinite(scale) || scale <= 0 ||
+      ![rotation.x, rotation.y, rotation.z, rotation.w].every(Number.isFinite) ||
+      rotation.lengthSq() < 1e-8) return false;
+    const targetRotation = rotation.clone().normalize();
+    if (!this.ready) {
+      this.position.copy(position);
+      this.rotation.copy(targetRotation);
+      this.scale = scale;
+      this.ready = true;
+      this.lastTime = time;
+      this.lastObservation = time;
+      this.px.update(position.x,time);this.py.update(position.y,time);
+      this.pz.update(position.z,time);this.size.update(scale,time);
+      return true;
+    }
+    if (time < this.lastTime) return false;
+    const gap = time - this.lastObservation;
+    const distance = this.position.distanceTo(position);
+    // A true loss or impossible position jump requires a clean reacquisition.
+    if (gap > 450 || distance > 220) {
+      this.reset();
+      return this.update(position, targetRotation, scale, time);
+    }
+    const dt = THREE.MathUtils.clamp((time - this.lastTime) / 1000, 0.001, 0.1);
+    this.position.set(this.px.update(position.x,time),
+      this.py.update(position.y,time),this.pz.update(position.z,time));
+    this.scale = this.size.update(scale,time);
+    // Hemisphere alignment prevents discontinuous quaternion interpolation.
+    if (this.rotation.dot(targetRotation) < 0) targetRotation.set(
+      -targetRotation.x,-targetRotation.y,-targetRotation.z,-targetRotation.w);
+    const angularError = this.rotation.angleTo(targetRotation);
+    const alpha = 1 - Math.exp(-dt * (7 + Math.min(1,angularError/0.6) * 11));
+    this.rotation.slerp(targetRotation,alpha).normalize();
+    this.lastTime = time;
+    this.lastObservation = time;
+    return finite(this.position) && Number.isFinite(this.scale);
+  }
 }
