@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, re, secrets, uuid
+import os, re, secrets, uuid, json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, Header, Query
@@ -74,6 +74,20 @@ class Product(Base):
     published: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     store: Mapped[Store] = relationship(back_populates="products")
+    ring_calibration: Mapped[Optional["RingCalibrationRecord"]] = relationship(cascade="all, delete-orphan", uselist=False)
+
+class RingCalibrationRecord(Base):
+    __tablename__ = "ring_calibrations"
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), primary_key=True)
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+
+class RingCalibrationInput(BaseModel):
+    center: tuple[float,float,float] | None = None
+    holeAxis: tuple[float,float,float] | None = None
+    stoneDirection: tuple[float,float,float] | None = None
+    innerDiameter: float | None = Field(default=None, gt=0)
+    fitMultiplier: float = Field(default=1.0, ge=0.6, le=1.5)
+    anchorFraction: float = Field(default=0.22, ge=0.05, le=0.65)
 
 class StoreInput(BaseModel):
     name: str = Field(min_length=2, max_length=120)
@@ -139,6 +153,7 @@ def product_dict(p):
     "category":p.category,"metal":p.metal,"weight_grams":p.weight_grams,"size_label":p.size_label,
     "cover_url":p.cover_url,"glb_url":p.glb_url,"usdz_url":p.usdz_url,"scale":p.scale,
     "ar_enabled":p.ar_enabled,"published":p.published,"created_at":p.created_at.isoformat(),
+    "ring_calibration":json.loads(p.ring_calibration.config_json) if p.ring_calibration else None,
     "product_url":f"{settings.public_base_url}/s/{p.store.slug}/p/{p.slug}",
     "ar_url":f"{settings.public_base_url}/ar/{p.id}"}
 
@@ -210,6 +225,21 @@ def update_product(product_id:str,body:ProductInput,_:bool=Depends(admin),sessio
     if exists and exists.id!=p.id: raise HTTPException(409,"Product slug already exists")
     for key,val in body.model_dump().items(): setattr(p,key,val)
     session.commit();return product_dict(p)
+
+@app.put("/api/admin/products/{product_id}/ring-calibration")
+def save_ring_calibration(product_id:str,body:RingCalibrationInput,_:bool=Depends(admin),session:Session=Depends(db)):
+    p=session.get(Product,product_id)
+    if not p: raise HTTPException(404,"Product not found")
+    if p.category!="ring": raise HTTPException(422,"Calibration only applies to rings")
+    config=body.model_dump(exclude_none=True)
+    record=session.get(RingCalibrationRecord,product_id)
+    if not record:
+        record=RingCalibrationRecord(product_id=product_id)
+        session.add(record)
+    record.config_json=json.dumps(config)
+    session.commit()
+    session.refresh(p)
+    return product_dict(p)
 
 @app.delete("/api/admin/products/{product_id}",status_code=204)
 def delete_product(product_id:str,_:bool=Depends(admin),session:Session=Depends(db)):
