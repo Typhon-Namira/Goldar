@@ -100,7 +100,7 @@ export default function HandTryOn({product}:{product:Product}){
    // Optional glTF scene extras: { "ringCalibration": { center, holeAxis, stoneDirection, innerDiameter } }.
    // Auto-detection remains the fallback for legacy catalog items.
    const embeddedCalibration=model.userData?.ringCalibration as RingCalibrationOverride|undefined;
-   const ringCalibration=inspectRingGeometry(model,embeddedCalibration);
+   const ringCalibration=inspectRingGeometry(model,{...embeddedCalibration,...product.ring_calibration});
    const modelPivot=attachCalibratedRing(model,ringCalibration);
    anchor.add(modelPivot);
    const modelDiameter=Math.max(ringCalibration.innerDiameter,1e-5);
@@ -198,8 +198,8 @@ uniform vec2 screenSize;
      seen=time;anchor.visible=true;
      const idx=product.category==="ring"?fingerBases[finger]:[0,9];
      const base=toScreen(points[idx[0]]),tip=toScreen(points[idx[1]]);
-     const x=lerp(base.x,tip.x,product.category==="ring"?.22:-.12);
-     const y=lerp(base.y,tip.y,product.category==="ring"?.22:-.12);
+     const x=lerp(base.x,tip.x,product.category==="ring"?(product.ring_calibration?.anchorFraction??.22):-.12);
+     const y=lerp(base.y,tip.y,product.category==="ring"?(product.ring_calibration?.anchorFraction??.22):-.12);
      const indexBase=toScreen(points[5]),pinkyBase=toScreen(points[17]);
      const palmWidth=Math.hypot(indexBase.x-pinkyBase.x,indexBase.y-pinkyBase.y);
      // Anatomical calibration: palm breadth approximates proximal finger breadth.
@@ -213,7 +213,7 @@ uniform vec2 screenSize;
      const widthEstimate=product.category==="ring"?Math.min(palmWidth*.29,Math.max(palmWidth*.16,adjacentSeparation*.68)):palmWidth*.55;
      const fingerWidth=Math.max(11,widthEstimate*calibration);
      // Fit by measured hole diameter, rather than external geometry diameter.
-     const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1);
+     const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1);
      const world=(detected.worldLandmarks?.[0]||points) as Point[];
      const label=detected.handedness?.[0]?.[0]?.categoryName;
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
@@ -304,7 +304,7 @@ uniform vec2 screenSize;
     setPhase("error");
     setMessage(err instanceof Error?err.message:"Unable to start virtual try-on.");
   }
- },[stop,supported,product.glb_url,product.scale,product.category,facing,finger,fit,occlusion,calibration]);
+ },[stop,supported,product.glb_url,product.scale,product.ring_calibration,product.category,facing,finger,fit,occlusion,calibration]);
 
  useEffect(()=>()=>{sessionRef.current++;cleanRef.current();streamRef.current?.getTracks().forEach(t=>t.stop())},[]);
  return <section className="tryon-panel">
