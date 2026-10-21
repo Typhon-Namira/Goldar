@@ -46,6 +46,16 @@ describe("isolated anatomical anchor",()=>{
   expect(p!.axis.angleTo(new THREE.Vector3(0,1,0))).toBeGreaterThan(.3);
   expect(p!.quaternion.length()).toBeCloseTo(1,6);
  });
+ it("maintains quaternion hemisphere continuity across equivalent observations",()=>{
+  const first=solve(hand())!;
+  const opposite=first.quaternion.clone().multiplyScalar(-1);
+  const second=solve(hand(),{previousQuaternion:opposite})!;
+  expect(second.quaternion.dot(opposite)).toBeGreaterThan(.999);
+ });
+ it("rejects low-observability anchors when a quality threshold is requested",()=>{
+  expect(solve(hand(),{minimumQuality:1})).toBeNull();
+  expect(solve(hand(),{minimumQuality:NaN})).toBeNull();
+ });
  it("rejects invalid geometry, missing hand identity, and non-finite projections",()=>{
   expect(solve(hand().slice(0,12))).toBeNull();
   expect(solve(hand(),{reportedSide:"Unknown"})).toBeNull();
