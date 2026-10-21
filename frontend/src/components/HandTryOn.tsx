@@ -2,6 +2,7 @@
 
 import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
+import {estimateFingerPose,PoseSmoother,type HandSide,type PalmView} from "@/lib/handPose";
 
 type Phase="idle"|"loading"|"active"|"not-found"|"error";
 type Category="ring"|"bracelet";
@@ -23,12 +24,14 @@ export default function HandTryOn({product}:{product:Product}){
  const [fit,setFit]=useState(1);
  const [occlusion,setOcclusion]=useState(true);
  const [calibration,setCalibration]=useState(1);
+ const [trackingInfo,setTrackingInfo]=useState<{side:HandSide;view:PalmView;confidence:number}|null>(null);
  const supported=product.category==="ring"||product.category==="bracelet";
  const stop=useCallback(()=>{
    sessionRef.current+=1;
    cleanRef.current();cleanRef.current=()=>{};
    streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;
    if(videoRef.current){videoRef.current.pause();videoRef.current.srcObject=null}
+   setTrackingInfo(null);
    setPhase("idle");
  },[]);
 
@@ -194,6 +197,8 @@ uniform vec2 screenSize;
    anchor.add(fingerCore);
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
    let lostAt=0;
+   const poseFilter=new PoseSmoother();
+   let latestTelemetry=0;
    const lastValidPosition=new THREE.Vector3();
    const lastValidQuaternion=new THREE.Quaternion();
    let maskFailure=false;
@@ -201,10 +206,10 @@ uniform vec2 screenSize;
    maskImage.width=256;maskImage.height=256;
 
    const poseQuat=new THREE.Quaternion();
-   const basis=new THREE.Matrix4();const vx=new THREE.Vector3(),vy=new THREE.Vector3(),vz=new THREE.Vector3();
-   const smoothPosition=new THREE.Vector3(),smoothQuaternion=new THREE.Quaternion();let initialized=false;
-   let lastPoseTime=0;
-   const worldV=(pt:Point)=>new THREE.Vector3(pt.x,-pt.y,-pt.z);
+
+   let initialized=false;
+
+
    const cameraAspect=()=>({w:canvas.clientWidth,h:canvas.clientHeight});
    const toScreen=(pt:Point)=>{
      const {w,h}=cameraAspect();const vw=video.videoWidth||w,vh=video.videoHeight||h;
@@ -227,7 +232,7 @@ uniform vec2 screenSize;
      const detected=hand.detectForVideo(video,time);
      const points=detected.landmarks[0] as Point[]|undefined;
      if(!points||points.length<21){
-       if(time-seen>450){anchor.visible=false;setMessage(prev=>prev==="Hand not found — keep your hand in the frame."?prev:"Hand not found — keep your hand in the frame.")}
+       if(time-seen>450){poseFilter.reset();setTrackingInfo(null);anchor.visible=false;setMessage(prev=>prev==="Hand not found — keep your hand in the frame."?prev:"Hand not found — keep your hand in the frame.")}
        renderer.render(scene,camera);return;
      }
      seen=time;anchor.visible=true;
@@ -249,38 +254,25 @@ uniform vec2 screenSize;
      const fingerWidth=Math.max(11,widthEstimate*calibration);
      const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1);
      const world=(detected.worldLandmarks?.[0]||points) as Point[];
-     const a=worldV(world[idx[0]]),b=worldV(world[idx[1]]);
-     vy.subVectors(b,a).normalize();
-     vx.subVectors(worldV(world[5]),worldV(world[17])).normalize();
-     vx.addScaledVector(vy,-vx.dot(vy));
-     if(vx.lengthSq()<1e-6){
-       vx.set(1,0,0).addScaledVector(vy,-vy.x);
+     const label=detected.handedness?.[0]?.[0]?.categoryName;
+     const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
+     const pose=estimateFingerPose(world,finger,side,poseFilter.ready?poseFilter.rotation:undefined);
+     if(!pose){anchor.visible=false;renderer.render(scene,camera);return}
+     poseQuat.copy(pose.quaternion);
+     if(time-latestTelemetry>450){
+       setTrackingInfo({side:pose.handSide,view:pose.view,confidence:pose.confidence});
+       latestTelemetry=time;
      }
-     vx.normalize();
-     vz.crossVectors(vx,vy).normalize();
-     if(vz.z<0){vx.negate();vz.negate()}
-     vx.crossVectors(vy,vz).normalize();
-     basis.makeBasis(vx,vy,vz);
-     poseQuat.setFromRotationMatrix(basis);
-     if(!Number.isFinite(targetScale)||targetScale<=0||!Number.isFinite(poseQuat.w)||vy.lengthSq()<.5||vz.lengthSq()<.5){
+     if(!Number.isFinite(targetScale)||targetScale<=0){
        anchor.visible=false;renderer.render(scene,camera);return;
      }
      const position=new THREE.Vector3(x-w/2,h/2-y,0);
-     const seconds=lastPoseTime?Math.min(.1,(time-lastPoseTime)/1000):.033;
-     lastPoseTime=time;
-     // Reject implausible single-frame landmark jumps instead of snapping jewelry away.
-     const displacement=initialized?position.distanceTo(smoothPosition):0;
-     if(initialized&&displacement>Math.max(w,h)*.40){anchor.visible=false;renderer.render(scene,camera);return;}
-     const positionGain=initialized?Math.min(.82,1-Math.exp(-seconds*(8+displacement*.06))):1;
-     const rotationGain=initialized?1-Math.exp(-seconds*10):1;
-     const sizeGain=initialized?1-Math.exp(-seconds*7):1;
-     smoothPosition.lerp(position,positionGain);
-     // Canonicalize quaternion sign to avoid interpolation across the long arc.
-     if(initialized&&smoothQuaternion.dot(poseQuat)<0){poseQuat.set(-poseQuat.x,-poseQuat.y,-poseQuat.z,-poseQuat.w)}
-     smoothQuaternion.slerp(poseQuat,rotationGain);
-     anchor.position.copy(smoothPosition);
-     anchor.quaternion.copy(smoothQuaternion);
-     anchor.scale.setScalar(lerp(anchor.scale.x||targetScale,targetScale,sizeGain));
+     if(!poseFilter.update(position,poseQuat,targetScale,time)){
+       anchor.visible=false;renderer.render(scene,camera);return;
+     }
+     anchor.position.copy(poseFilter.position);
+     anchor.quaternion.copy(poseFilter.rotation);
+     anchor.scale.setScalar(poseFilter.scale);
      // Calibrated model-space core: front surface sits behind the front gem.
      // It writes depth only, hiding rear-facing band sections.
      fingerCore.visible=occlusion&&product.category==="ring";
