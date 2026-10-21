@@ -195,7 +195,12 @@ uniform vec2 screenSize;
      const detected=hand.detectForVideo(video,time);
      const points=detected.landmarks[0] as Point[]|undefined;
      if(!points||points.length<21){
-       if(time-seen>450){poseFilter.reset();setTrackingInfo(null);anchor.visible=false;setMessage(prev=>prev==="Hand not found — keep your hand in the frame."?prev:"Hand not found — keep your hand in the frame.")}
+       if(!poseFilter.hold(time)){
+         poseFilter.reset();setTrackingInfo(null);anchor.visible=false;
+         setMessage(prev=>prev==="Hand not found — keep your hand in the frame."?prev:"Hand not found — keep your hand in the frame.");
+       } else {
+         anchor.visible=true;
+       }
        renderer.render(scene,camera);return;
      }
      seen=time;anchor.visible=true;
@@ -207,7 +212,7 @@ uniform vec2 screenSize;
      const label=detected.handedness?.[0]?.[0]?.categoryName;
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      const frame=estimateFingerFrame(world,finger,side,poseFilter.ready?poseFilter.rotation:undefined);
-     if(!frame){anchor.visible=false;renderer.render(scene,camera);return}
+     if(!frame){anchor.visible=poseFilter.hold(time);renderer.render(scene,camera);return}
      const frameTransform=product.category==="ring"?computeRingTransform({
        landmarks:points,finger,frame,toScreen,viewportWidth:w,viewportHeight:h,
        innerDiameter:modelDiameter,
@@ -226,7 +231,7 @@ uniform vec2 screenSize;
        telemetryFrames=0;latestTelemetry=time;
      }
      if(!Number.isFinite(targetScale)||targetScale<=0){
-       anchor.visible=false;renderer.render(scene,camera);return;
+       anchor.visible=poseFilter.hold(time);renderer.render(scene,camera);return;
      }
      const position=frameTransform?.center??new THREE.Vector3(x-w/2,h/2-y,0);
      if(!poseFilter.update(position,poseQuat,targetScale,time)){
