@@ -46,12 +46,18 @@ export function estimateAnatomicalRingAnchor(input:{
   depthFactor?:number;
   reportedSide?:HandSide;
   cameraFacing?:"environment"|"user";
+  /** Previous accepted quaternion for temporal hemisphere continuity. */
+  previousQuaternion?:THREE.Quaternion;
+  /** Minimum geometric observability to accept this frame. */
+  minimumQuality?:number;
 }):CameraRingPose|null {
   const {landmarks, finger, toScreen, width,height,holeDiameter,
     anchorFraction,fitMultiplier,widthCalibration}=input;
   if(landmarks.length<21 || !landmarks.every(good) ||
     ![width,height,holeDiameter,anchorFraction,fitMultiplier,widthCalibration].every(Number.isFinite) ||
     width<=0||height<=0||holeDiameter<=1e-8||fitMultiplier<=0||widthCalibration<=0)return null;
+  if(!(finger in JOINTS))return null;
+  if(input.minimumQuality!==undefined && (!Number.isFinite(input.minimumQuality)||input.minimumQuality<0||input.minimumQuality>1))return null;
   const [m,p,d]=JOINTS[finger];
   // Map landmarks to a shared *camera* coordinate frame. The overlay uses
   // orthographic projection; Z is relative landmark displacement expressed
@@ -120,5 +126,13 @@ export function estimateAnatomicalRingAnchor(input:{
   if(!Number.isFinite(scale)||scale<=0||![position.x,position.y,position.z,quaternion.x,quaternion.y,quaternion.z,quaternion.w].every(Number.isFinite))return null;
   const quality=THREE.MathUtils.clamp(lateralSize/handBreadth,0,1)*
     THREE.MathUtils.clamp((bend+1)/2,0.25,1);
+  if(!Number.isFinite(quality)||quality<(input.minimumQuality??0))return null;
+  // Quaternions q and -q represent the same physical rotation; choose the
+  // hemisphere closest to the previous observation to prevent sign flips.
+  const previous=input.previousQuaternion;
+  if(previous && [previous.x,previous.y,previous.z,previous.w].every(Number.isFinite)
+      && previous.lengthSq()>1e-8 && quaternion.dot(previous)<0){
+    quaternion.set(-quaternion.x,-quaternion.y,-quaternion.z,-quaternion.w);
+  }
   return {position,quaternion,scale,fingerWidthPx,dorsal,axis,quality};
 }
