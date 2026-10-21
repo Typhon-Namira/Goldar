@@ -3,7 +3,7 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
 import {estimateFingerPose,PoseSmoother,type HandSide,type PalmView} from "@/lib/handPose";
-import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
+import {inspectRingGeometry,attachCalibratedRing,type RingCalibrationOverride} from "@/lib/ringCalibration";
 
 type Phase="idle"|"loading"|"active"|"not-found"|"error";
 type Category="ring"|"bracelet";
@@ -83,7 +83,10 @@ export default function HandTryOn({product}:{product:Product}){
    const model=loaded.scene;
    // Phase 2: derive the inner rim, center and axial alignment in MODEL coordinates.
    // Do not use global model bounds, which include a tall gemstone.
-   const ringCalibration=inspectRingGeometry(model);
+   // Optional glTF scene extras: { "ringCalibration": { center, holeAxis, stoneDirection, innerDiameter } }.
+   // Auto-detection remains the fallback for legacy catalog items.
+   const embeddedCalibration=model.userData?.ringCalibration as RingCalibrationOverride|undefined;
+   const ringCalibration=inspectRingGeometry(model,embeddedCalibration);
    const modelPivot=attachCalibratedRing(model,ringCalibration);
    anchor.add(modelPivot);
    const modelDiameter=Math.max(ringCalibration.innerDiameter,1e-5);
