@@ -54,7 +54,8 @@ describe("isolated anatomical anchor",()=>{
   expect(second.quaternion.dot(opposite)).toBeGreaterThan(.999);
  });
  it("rejects low-observability anchors when a quality threshold is requested",()=>{
-  expect(solve(hand(),{minimumQuality:1})).toBeNull();
+  const bent=hand(); bent[15]={...bent[14],x:bent[14].x+.08,y:bent[14].y-.02};
+  expect(solve(bent,{minimumQuality:1})).toBeNull();
   expect(solve(hand(),{minimumQuality:NaN})).toBeNull();
  });
  it("rejects invalid geometry, missing hand identity, and non-finite projections",()=>{
