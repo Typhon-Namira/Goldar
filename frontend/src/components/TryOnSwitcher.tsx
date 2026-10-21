@@ -7,7 +7,7 @@ export default function TryOnSwitcher({product}:{product:Product}){
  const [engine,setEngine]=useState<Engine>("webar");
  const [running,setRunning]=useState(false);
  const [version,setVersion]=useState(0);
- const [scale,setScale]=useState(.421);
+ const [scale,setScale]=useState(25);
  const [x,setX]=useState(-1.66),[y,setY]=useState(-11.91),[z,setZ]=useState(.26);
  const url=useMemo(()=>{
   const q=new URLSearchParams({glb:product.glb_url,scale:String(scale),x:String(x),y:String(y),z:String(z)});
@@ -34,7 +34,7 @@ export default function TryOnSwitcher({product}:{product:Product}){
      <button className="btn ghost" type="button" onClick={()=>{setRunning(false);setVersion(v=>v+1)}}>STOP CAMERA</button>
      <button className="btn ghost" type="button" onClick={()=>setVersion(v=>v+1)} disabled={!running}>RESTART WITH CALIBRATION</button>
     </div>
-    <label className="tryon-setting">Model scale <input type="range" min=".1" max="1.5" step=".01" value={scale} onChange={e=>setScale(Number(e.target.value))}/><strong>{scale.toFixed(2)}</strong></label>
+    <label className="tryon-setting">Model scale <input type="range" min="1" max="80" step=".5" value={scale} onChange={e=>setScale(Number(e.target.value))}/><strong>{scale.toFixed(1)}</strong></label>
     {([["X",x,setX],["Y",y,setY],["Z",z,setZ]] as const).map(([label,val,set])=><label key={label} className="tryon-setting">Offset {label}<input type="range" min="-20" max="20" step=".1" value={val} onChange={e=>set(Number(e.target.value))}/><strong>{val.toFixed(1)}</strong></label>)}
     <p className="tryon-hint">Adjust sliders, then press RESTART WITH CALIBRATION. Reset to the old engine using the selector above. Android Chrome and iPhone Safari must be validated separately.</p>
    </div>
