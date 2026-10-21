@@ -67,20 +67,34 @@ export default function HandTryOn({product}:{product:Product}){
    const loaded=await new GLTFLoader().loadAsync(product.glb_url);
    if(generation!==sessionRef.current){hand.close();return}
    const scene=new THREE.Scene();
-   scene.add(new THREE.AmbientLight(0xffffff,2.5));
-   const light=new THREE.DirectionalLight(0xffefda,2.0);light.position.set(3,6,8);scene.add(light);
-   const fill=new THREE.DirectionalLight(0xffffff,1.1);fill.position.set(-4,3,5);scene.add(fill);
+   scene.add(new THREE.AmbientLight(0xffffff,0.55));
+   const light=new THREE.DirectionalLight(0xffefda,2.5);light.position.set(3,6,8);scene.add(light);
+   const fill=new THREE.DirectionalLight(0xffffff,1.4);fill.position.set(-4,3,5);scene.add(fill);
    const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true,powerPreference:"low-power"});
    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
    renderer.outputColorSpace=THREE.SRGBColorSpace;
    renderer.toneMapping=THREE.ACESFilmicToneMapping;
-   renderer.toneMappingExposure=1.2;
+   renderer.toneMappingExposure=1.15;
+   const [{RoomEnvironment}]=await Promise.all([import("three/examples/jsm/environments/RoomEnvironment.js")]);
+   const pmrem=new THREE.PMREMGenerator(renderer);
+   const environment=pmrem.fromScene(new RoomEnvironment());
+   scene.environment=environment.texture;
    // Orthographic pixel-space overlay intentionally matches the video projection.
    // A metrically accurate perspective camera requires device intrinsics unavailable to ordinary mobile web pages.
    const camera=new THREE.OrthographicCamera(-1,1,1,-1,.1,100);
    camera.position.set(0,0,20);camera.lookAt(0,0,0);
    const anchor=new THREE.Group();scene.add(anchor);
    const model=loaded.scene;
+   // Preserve supplied metal/stone PBR textures and normals. Use studio reflections.
+   model.traverse(node=>{if(node instanceof THREE.Mesh){
+     const materials=Array.isArray(node.material)?node.material:[node.material];
+     for(const mat of materials){
+       if(mat instanceof THREE.MeshStandardMaterial){
+         mat.envMapIntensity=mat.metalness>.6?1.6:1.0;
+         mat.needsUpdate=true;
+       }
+     }
+   }});
    // Phase 2: derive the inner rim, center and axial alignment in MODEL coordinates.
    // Do not use global model bounds, which include a tall gemstone.
    // Optional glTF scene extras: { "ringCalibration": { center, holeAxis, stoneDirection, innerDiameter } }.
@@ -101,6 +115,7 @@ export default function HandTryOn({product}:{product:Product}){
    maskTexture.flipY=false;
    let segmenter:import("@mediapipe/tasks-vision").ImageSegmenter|null=null;
    let segmentEnabled=false,segmentLast=0;
+   let maskValidUntil=0;
    let segmentationReady=false;
    void (async()=>{
      try{
@@ -118,7 +133,7 @@ export default function HandTryOn({product}:{product:Product}){
    // Its radius is calibrated per frame; it MUST remain smaller than the ring.
    // This is geometric depth occlusion, not image segmentation.
    const fingerCore=new THREE.Mesh(
-     new THREE.CylinderGeometry(modelDiameter*.42,modelDiameter*.42,modelDiameter*1.4,32,1,false),
+     new THREE.CylinderGeometry(modelDiameter*.44,modelDiameter*.44,modelDiameter*1.65,48,1,false),
      new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,depthTest:true,side:THREE.FrontSide})
    );
    const occlusionMat=fingerCore.material as import("three").MeshBasicMaterial;
@@ -137,7 +152,8 @@ uniform vec2 screenSize;
      );
      (occlusionMat.userData as {shader?:typeof shader}).shader=shader;
    };
-   fingerCore.renderOrder=-1;
+   fingerCore.renderOrder=-20;
+   modelPivot.renderOrder=1;
    anchor.add(fingerCore);
    let raf=0,lastTimestamp=-1,previous=0,seen=0;
    let lostAt=0;
@@ -252,7 +268,7 @@ uniform vec2 screenSize;
              maskCtx.stroke();
              maskCtx.globalCompositeOperation="source-over";
              maskTexture.needsUpdate=true;
-             segmentationReady=true;
+             segmentationReady=true;maskValidUntil=time+260;
            }
          }
          result.close();
@@ -263,17 +279,18 @@ uniform vec2 screenSize;
      }
      const shader=(occlusionMat.userData as {shader?:{uniforms:Record<string,{value:unknown}>}}).shader;
      if(shader){
-       shader.uniforms.maskEnabled.value=segmentationReady?1.0:0.0;
+       shader.uniforms.maskEnabled.value=segmentationReady&&time<maskValidUntil?1.0:0.0;
        (shader.uniforms.screenSize.value as import("three").Vector2).set(canvas.width,canvas.height);
      }
      fingerCore.scale.set(1,1,1);
-     fingerCore.position.set(0,0,-modelDiameter*.08);
+     fingerCore.position.set(0,0,-modelDiameter*.18);
      initialized=true;
      setMessage(prev=>prev==="Hand detected — move slowly to inspect the fit."?prev:"Hand detected — move slowly to inspect the fit.");
      renderer.render(scene,camera);
    };
    cleanRef.current=()=>{
-     cancelAnimationFrame(raf);hand.close();segmenter?.close();maskTexture.dispose();renderer.dispose();
+     cancelAnimationFrame(raf);hand.close();segmenter?.close();maskTexture.dispose();
+     scene.environment=null;environment.dispose();pmrem.dispose();renderer.dispose();
      scene.traverse(o=>{if(o instanceof THREE.Mesh){
        o.geometry?.dispose();const materials=Array.isArray(o.material)?o.material:[o.material];
        materials.forEach(m=>m?.dispose())}});
