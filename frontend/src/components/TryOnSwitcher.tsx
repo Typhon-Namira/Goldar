@@ -4,10 +4,10 @@ import type {Product} from "@/lib/api";
 import HandTryOn from "@/components/HandTryOn";
 type Engine="webar"|"legacy";
 export default function TryOnSwitcher({product}:{product:Product}){
- const [engine,setEngine]=useState<Engine>("webar");
+ const [engine,setEngine]=useState<Engine>("legacy");
  const [running,setRunning]=useState(false);
  const [version,setVersion]=useState(0);
- const [scale,setScale]=useState(25);
+ const [scale,setScale]=useState(.421);
  const [x,setX]=useState(-1.66),[y,setY]=useState(-11.91),[z,setZ]=useState(.26);
  const url=useMemo(()=>{
   const q=new URLSearchParams({glb:product.glb_url,scale:String(scale),x:String(x),y:String(y),z:String(z)});
@@ -17,7 +17,7 @@ export default function TryOnSwitcher({product}:{product:Product}){
  return <section className="tryon-panel">
   <div className="tryon-controls" style={{paddingBottom:16}}>
    <div className="tryon-controlrow">
-    <button type="button" className={"btn "+(engine==="webar"?"gold":"ghost")} onClick={()=>switchEngine("webar")}>WEBAR.ROCKS — NEW</button>
+    <button type="button" className={"btn "+(engine==="webar"?"gold":"ghost")} onClick={()=>switchEngine("webar")}>WEBAR.ROCKS — EXPERIMENTAL</button>
     <button type="button" className={"btn "+(engine==="legacy"?"gold":"ghost")} onClick={()=>switchEngine("legacy")}>MEDIAPIPE — OLD</button>
    </div>
    <p className="tryon-disclaimer">Experimental A/B test. WebAR.rocks runs in an isolated camera frame. It uses your Goldar GLB but its default demo calibration may not fit this ring without adjustment. Both engines process camera video on-device.</p>
@@ -34,7 +34,7 @@ export default function TryOnSwitcher({product}:{product:Product}){
      <button className="btn ghost" type="button" onClick={()=>{setRunning(false);setVersion(v=>v+1)}}>STOP CAMERA</button>
      <button className="btn ghost" type="button" onClick={()=>setVersion(v=>v+1)} disabled={!running}>RESTART WITH CALIBRATION</button>
     </div>
-    <label className="tryon-setting">Model scale <input type="range" min="1" max="80" step=".5" value={scale} onChange={e=>setScale(Number(e.target.value))}/><strong>{scale.toFixed(1)}</strong></label>
+    <label className="tryon-setting">Model scale <input type="range" min=".05" max="5" step=".05" value={scale} onChange={e=>setScale(Number(e.target.value))}/><strong>{scale.toFixed(1)}</strong></label>
     {([["X",x,setX],["Y",y,setY],["Z",z,setZ]] as const).map(([label,val,set])=><label key={label} className="tryon-setting">Offset {label}<input type="range" min="-20" max="20" step=".1" value={val} onChange={e=>set(Number(e.target.value))}/><strong>{val.toFixed(1)}</strong></label>)}
     <p className="tryon-hint">Adjust sliders, then press RESTART WITH CALIBRATION. Reset to the old engine using the selector above. Android Chrome and iPhone Safari must be validated separately.</p>
    </div>
