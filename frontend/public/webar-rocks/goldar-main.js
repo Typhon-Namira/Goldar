@@ -409,7 +409,7 @@ function flip_camera(){
 
 
 function set_canvasMirroring(isMirror){
-  const CSSTransformValue = (isMirror) ? 'rotateY(180deg) translate(50%)' : 'translate(-50%)';
+  const CSSTransformValue = (isMirror) ? 'scaleX(-1)' : 'none';
   document.getElementById('canvases').style.transform = CSSTransformValue;
 }
 
