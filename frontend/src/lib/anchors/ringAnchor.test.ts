@@ -48,7 +48,8 @@ describe("isolated anatomical anchor",()=>{
  });
  it("maintains quaternion hemisphere continuity across equivalent observations",()=>{
   const first=solve(hand())!;
-  const opposite=first.quaternion.clone().multiplyScalar(-1);
+  const opposite=first.quaternion.clone();
+  opposite.set(-opposite.x,-opposite.y,-opposite.z,-opposite.w);
   const second=solve(hand(),{previousQuaternion:opposite})!;
   expect(second.quaternion.dot(opposite)).toBeGreaterThan(.999);
  });
