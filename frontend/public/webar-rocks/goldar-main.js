@@ -4,7 +4,7 @@ const NNPath = 'https://cdn.jsdelivr.net/gh/WebAR-rocks/WebAR.rocks.hand@master/
 const NNWristVersion = '27';
 const NNRingVersion = '14';
 const NNWristBackVersion = '24'; // best: 24
-const NNRingBackVersion = '27'; // best: 27
+const NNRingBackVersion = '11'; // published RingBack model; upstream demo references missing 27 // best: 27
 
 const wristModesCommonSettings = {
   threshold: 0.95, // detection sensitivity, between 0 and 1
