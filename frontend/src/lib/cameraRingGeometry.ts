@@ -90,7 +90,7 @@ export function solveCameraRingPose(input:{
   const position=mcp.clone().lerp(pip,t);
   // The renderer is a pixel-space orthographic projection. Relative depth
   // changes do not move the on-screen center and must remain bounded.
-  position.z=THREE.MathUtils.clamp(position.z,-width*0.25,width*0.25);
+  position.z=0; // Fixed orthographic rendering plane; depth informs rotation only.
 
   const neighbor=NEIGHBORS[finger];
   const spacing=cameraPoint(neighbor[0]).distanceTo(cameraPoint(neighbor[1]));
