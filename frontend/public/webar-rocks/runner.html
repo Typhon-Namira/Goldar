@@ -22,15 +22,15 @@ window.GOLDAR_SCALE=Math.max(0.05,Math.min(100,Number(q.get("scale"))||25));
 window.GOLDAR_OFFSET_X=Math.max(-30,Math.min(30,Number(q.get("x"))||-1.66));
 window.GOLDAR_OFFSET_Y=Math.max(-30,Math.min(30,Number(q.get("y"))||-11.91));
 window.GOLDAR_OFFSET_Z=Math.max(-30,Math.min(30,Number(q.get("z"))||0.26));
-window.addEventListener("error",ev=>{const el=document.getElementById("loading");if(el){el.textContent="WebAR engine error: "+ev.message;el.className="error"}});
+window.addEventListener("error",ev=>{const el=document.getElementById("loading");if(el){const src=ev.filename||ev.target?.src||"unknown";el.textContent="WebAR engine error: "+(ev.message||"Resource load failed")+" ("+src+")";el.className="error"}} ,true);
 window.addEventListener("unhandledrejection",ev=>{const el=document.getElementById("loading");if(el){el.textContent="AR initialization failed: "+String(ev.reason);el.className="error"}});
 </script>
-<script src="https://cdn.jsdelivr.net/gh/WebAR-rocks/WebAR.rocks.hand@master/dist/WebARRocksHand.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/WebAR-rocks/WebAR.rocks.hand@master/libs/three/v131/build/three.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/WebAR-rocks/WebAR.rocks.hand@master/libs/three/v131/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/WebAR-rocks/WebAR.rocks.hand@master/helpers/HandTrackerThreeHelper.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/WebAR-rocks/WebAR.rocks.hand@master/helpers/landmarksStabilizers/OneEuroLMStabilizer.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/WebAR-rocks/WebAR.rocks.hand@master/helpers/PoseFlipFilter.js"></script>
+<script src="/webar-rocks/vendor/WebARRocksHand.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/three@0.131.3/build/three.min.js"></script>
+<script src="/webar-rocks/vendor/GLTFLoader.js"></script>
+<script src="/webar-rocks/vendor/HandTrackerThreeHelper.js"></script>
+<script src="/webar-rocks/vendor/OneEuroLMStabilizer.js"></script>
+<script src="/webar-rocks/vendor/PoseFlipFilter.js"></script>
 <script src="./goldar-main.js"></script></head>
 <body><div id="loading">INITIALIZING WEBAR.ROCKS…</div>
 <div id="instructions"><div>Keep your hand upright and fully visible.<br>For this test, show the back of your hand toward the camera.<br><button onclick="hide_instructions()">START FITTING</button></div></div>
