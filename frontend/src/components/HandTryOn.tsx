@@ -3,6 +3,7 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
 import {estimateFingerPose,PoseSmoother,type HandSide,type PalmView} from "@/lib/handPose";
+import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 
 type Phase="idle"|"loading"|"active"|"not-found"|"error";
 type Category="ring"|"bracelet";
@@ -80,72 +81,12 @@ export default function HandTryOn({product}:{product:Product}){
    camera.position.set(0,0,20);camera.lookAt(0,0,0);
    const anchor=new THREE.Group();scene.add(anchor);
    const model=loaded.scene;
-   // Calibrate from the transformed band mesh, not the whole GLB bounds.
-   // The supplied ring.glb uses a transformed TORUS with hole axis X in scene
-   // space; its untransformed mesh has hole axis Y.
-   model.updateMatrixWorld(true);
-   const bandCandidates:import("three").Mesh[]=[];
-   const gemstoneCandidates:import("three").Mesh[]=[];
-   model.traverse(node=>{
-     if(node instanceof THREE.Mesh){
-       if(/torus|band|shank/i.test(node.name))bandCandidates.push(node);
-       if(/dodecahedron|diamond|gem|stone/i.test(node.name))gemstoneCandidates.push(node);
-     }
-   });
-   const band=bandCandidates[0];
-   let pivotCenter=new THREE.Vector3();
-   let holeDirection=new THREE.Vector3(0,1,0);
-   let innerDiameter=0;
-   let stoneDirection=new THREE.Vector3(0,0,1);
-   const wholeBounds=new THREE.Box3().setFromObject(model);
-   if(band){
-     band.geometry.computeBoundingBox();
-     const localBounds=band.geometry.boundingBox;
-     if(!localBounds)throw new Error("Unable to determine ring band bounds");
-     const localCenter=localBounds.getCenter(new THREE.Vector3());
-     const localSize=localBounds.getSize(new THREE.Vector3());
-     const axisIndex=[localSize.x,localSize.y,localSize.z].indexOf(Math.min(localSize.x,localSize.y,localSize.z));
-     const localAxis=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)][axisIndex];
-     const centerWorld=band.localToWorld(localCenter.clone());
-     pivotCenter=model.worldToLocal(centerWorld.clone());
-     holeDirection=localAxis.clone().transformDirection(band.matrixWorld);
-     const across=[0,1,2].filter(i=>i!==axisIndex);
-     // World-transformed band diameter from geometry-space transverse axes.
-     const transformedBandBox=new THREE.Box3().setFromObject(band);
-     const transformedSize=transformedBandBox.getSize(new THREE.Vector3());
-     const outerDiameter=Math.max(transformedSize.x,transformedSize.y,transformedSize.z);
-     // Supplied source model: torus cross-section (0.01996055) and OD (0.22)
-     // are transformed nonuniformly. Use the measured cross-section in the ring
-     // plane instead of mistaking the gemstone for the band.
-     const bandSpan=[localSize.x,localSize.y,localSize.z];
-     const planeDiameter=Math.max(bandSpan[across[0]],bandSpan[across[1]]);
-     const planeScale=outerDiameter/Math.max(planeDiameter,1e-6);
-     const suppliedRing=/torus/i.test(band.name)&&gemstoneCandidates.some(m=>/dodecahedron/i.test(m.name));
-     innerDiameter=suppliedRing?0.18007887*planeScale:outerDiameter*.82;
-     if(gemstoneCandidates.length){
-       const stoneWorld=new THREE.Box3().setFromObject(gemstoneCandidates[0]).getCenter(new THREE.Vector3());
-       stoneDirection.subVectors(stoneWorld,centerWorld).normalize();
-     }
-   }else{
-     wholeBounds.getCenter(pivotCenter);
-     const dims=wholeBounds.getSize(new THREE.Vector3());
-     const minAxis=[dims.x,dims.y,dims.z].indexOf(Math.min(dims.x,dims.y,dims.z));
-     holeDirection.set(minAxis===0?1:0,minAxis===1?1:0,minAxis===2?1:0);
-     innerDiameter=Math.max(dims.x,dims.y,dims.z)*.72;
-   }
-   const modelPivot=new THREE.Group();
-   model.position.sub(pivotCenter);
-   modelPivot.add(model);
-   const axisAlign=new THREE.Quaternion().setFromUnitVectors(holeDirection,new THREE.Vector3(0,1,0));
-   const gemFacing=stoneDirection.clone().applyQuaternion(axisAlign);
-   gemFacing.y=0;
-   if(gemFacing.lengthSq()>1e-6){
-     const spin=new THREE.Quaternion().setFromAxisAngle(
-       new THREE.Vector3(0,1,0),-Math.atan2(gemFacing.x,gemFacing.z));
-     modelPivot.quaternion.copy(spin.multiply(axisAlign));
-   }else modelPivot.quaternion.copy(axisAlign);
+   // Phase 2: derive the inner rim, center and axial alignment in MODEL coordinates.
+   // Do not use global model bounds, which include a tall gemstone.
+   const ringCalibration=inspectRingGeometry(model);
+   const modelPivot=attachCalibratedRing(model,ringCalibration);
    anchor.add(modelPivot);
-   const modelDiameter=Math.max(innerDiameter,1e-5);
+   const modelDiameter=Math.max(ringCalibration.innerDiameter,1e-5);
    // Segmentation is optional and never blocks the core tracking pipeline.
    // Pixelwise person segmentation is intersected with the tracked finger ROI.
    const maskCanvas=document.createElement("canvas");
@@ -252,6 +193,7 @@ uniform vec2 screenSize;
      const adjacentSeparation=Math.hypot(neighborA.x-neighborB.x,neighborA.y-neighborB.y);
      const widthEstimate=product.category==="ring"?Math.min(palmWidth*.29,Math.max(palmWidth*.16,adjacentSeparation*.68)):palmWidth*.55;
      const fingerWidth=Math.max(11,widthEstimate*calibration);
+     // Fit by measured hole diameter, rather than external geometry diameter.
      const targetScale=fingerWidth/modelDiameter*fit*(product.scale||1);
      const world=(detected.worldLandmarks?.[0]||points) as Point[];
      const label=detected.handedness?.[0]?.[0]?.categoryName;
