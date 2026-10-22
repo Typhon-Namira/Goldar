@@ -25,7 +25,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
  const [running,setRunning]=useState(false),[status,setStatus]=useState("Hybrid tracking: on-device MediaPipe + optional WiLoR corrections.");
  const [finger,setFinger]=useState<FingerName>("ring"),[facing,setFacing]=useState<"user"|"environment">("environment");
  const [fit,setFit]=useState(1),[widthCalibration,setWidthCalibration]=useState(1);
- const [occlusion,setOcclusion]=useState(false),[serverLatency,setServerLatency]=useState<number|null>(null);
+ const [occlusion,setOcclusion]=useState(true),[serverLatency,setServerLatency]=useState<number|null>(null);
  const stop=useCallback(()=>{cleanupRef.current();cleanupRef.current=()=>{};setRunning(false)},[]);
  useEffect(()=>()=>cleanupRef.current(),[]);
  const start=useCallback(async()=>{
@@ -57,7 +57,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const ctx=staging.getContext("2d");
    let raf=0,lastVideoTime=-1,lastTracked=0,lastServerSent=0,serverBusy=false,controller:AbortController|null=null;
    let correction:{dx:number;dy:number;scale:number;time:number}|null=null;
-   let latestLocal:Point[]|null=null;
+   
    const toScreen=(p:Point)=>{
     const w=canvas.clientWidth,h=canvas.clientHeight,vw=video.videoWidth||w,vh=video.videoHeight||h;
     const s=Math.max(w/vw,h/vh);return {x:p.x*vw*s+(w-vw*s)/2,y:p.y*vh*s+(h-vh*s)/2};
@@ -65,7 +65,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const solve=(points:Point[],side:HandSide)=>{
     const w=canvas.clientWidth,h=canvas.clientHeight;
     return solveCameraRingPose({landmarks:points,finger,toScreen,width:w,height:h,holeDiameter:diameter,
-     anchorFraction:product.ring_calibration?.anchorFraction??.38,
+     anchorFraction:product.ring_calibration?.anchorFraction??.52,
      fitMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
      widthCalibration,reportedSide:side,cameraFacing:facing,
      previousQuaternion:smoother.ready?smoother.rotation:undefined});
@@ -113,14 +113,14 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const label=detection.handedness?.[0]?.[0]?.categoryName;
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21){
-      latestLocal=points;
+
       const solved=solve(points,side);
       if(solved){
        const position=solved.position.clone(),scale=solved.scale;
        // Server result only makes small bounded adjustments; decay it rapidly.
        let adjustedScale=scale;
        if(correction){
-        const weight=Math.max(0,1-(now-correction.time)/1200)*.12;
+        const weight=Math.max(0,1-(now-correction.time)/1000)*.06;
         position.x+=correction.dx*weight;position.y+=correction.dy*weight;
         adjustedScale*=1+(correction.scale-1)*weight;
        }
@@ -135,7 +135,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      }
     }
     // Allow a brief detector dropout; never tie visibility to slow server calls.
-    if(now-lastTracked>700){anchor.visible=false;smoother.reset()}
+    if(now-lastTracked>850){anchor.visible=false;smoother.reset()}
     renderer.render(scene,camera);
    };
    cleanupRef.current=()=>{
@@ -162,7 +162,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    <label className="tryon-setting">Finger <select value={finger} disabled={running} onChange={e=>setFinger(e.target.value as FingerName)}>{(["ring","index","middle","pinky"] as const).map(v=><option key={v} value={v}>{v}</option>)}</select></label>
    <label className="tryon-setting">Visual fit <input type="range" min=".6" max="1.5" step=".05" disabled={running} value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
    <label className="tryon-setting">Finger width <input type="range" min=".75" max="1.35" step=".025" disabled={running} value={widthCalibration} onChange={e=>setWidthCalibration(Number(e.target.value))}/></label>
-   <label className="tryon-setting">Experimental finger occlusion <input type="checkbox" disabled={running} checked={occlusion} onChange={e=>setOcclusion(e.target.checked)}/></label>
+   <label className="tryon-setting">Finger depth occlusion <input type="checkbox" disabled={running} checked={occlusion} onChange={e=>setOcclusion(e.target.checked)}/></label>
    <p className="tryon-disclaimer">On-device tracking runs continuously; optional compressed frames are sent to WiLoR for bounded corrections. WebAR.rocks remains available as a separate fallback. Stop and restart to apply settings. Visual preview only, not a ring-size measurement.</p>
   </div>
  </section>;
