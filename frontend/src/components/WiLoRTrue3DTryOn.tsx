@@ -20,7 +20,6 @@ const cameraPoint=(p:P,cam:RemoteHandMesh["camera"])=>new THREE.Vector3(
  (p.x*cam.width-cam.cx)*p.z/cam.fx,
  -(p.y*cam.height-cam.cy)*p.z/cam.fy,-p.z
 );
-const mean=(a:number[])=>a.reduce((x,y)=>x+y,0)/Math.max(a.length,1);
 
 /** Calibrated off-axis projection of the actual WiLoR inference image into CSS video cover. */
 function projection(camera:THREE.PerspectiveCamera,cam:RemoteHandMesh["camera"],vw:number,vh:number,w:number,h:number){
@@ -124,7 +123,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    root.visible=false;
    let surface:THREE.Mesh|null=null,cam:RemoteHandMesh["camera"]|null=null;
    let captureFrame:ReturnType<typeof estimateFingerFrame>=null;
-   let captureCenter:P|null=null,captureDepth=0;
+   let captureDepth=0;
    let capturePalm=0,poseTime=0;
    let lastVideo=-1,lastRequest=0,busy=false,raf=0,controller:AbortController|null=null;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
@@ -141,7 +140,6 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     busy=true;lastRequest=now;
     ctx.drawImage(video,0,0,480,360);
     const captureWorld=world.map(p=>({...p}));
-    const captureLandmarks=landmarks.map(p=>({...p}));
     const capturedAt=performance.now();
     try{
      const blob=await new Promise<Blob|null>(resolve=>staging.toBlob(resolve,"image/jpeg",.7));
@@ -160,9 +158,6 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(!hand||hand.side!==side||!hand.mesh?.available){setStatus("3D mesh unavailable; waiting");return}
      const snap=snapshotGeometry(hand,finger,diameter,fit*(product.scale||1));
      const frame=estimateFingerFrame(captureWorld,finger,side);
-     const [m,p]=FINGERS[finger];
-     const center={x:(captureLandmarks[m].x+captureLandmarks[p].x)/2,
-      y:(captureLandmarks[m].y+captureLandmarks[p].y)/2,z:0};
      const palm=Math.hypot(captureLandmarks[5].x-captureLandmarks[17].x,captureLandmarks[5].y-captureLandmarks[17].y);
      if(!snap||!frame||frame.confidence<.35||palm<.03)return;
      if(surface){root.remove(surface);surface.geometry.dispose();(surface.material as THREE.Material).dispose()}
@@ -170,7 +165,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      ringPivot.position.copy(snap.anchor);
      ringPivot.quaternion.copy(snap.quat);
      ringPivot.scale.setScalar(snap.ringScale);
-     cam=snap.cam;captureFrame=frame;captureCenter=center;capturePalm=palm;
+     cam=snap.cam;captureFrame=frame;capturePalm=palm;
      captureDepth=-snap.anchor.z;poseTime=capturedAt;
      root.position.set(0,0,0);root.quaternion.identity();root.visible=true;
      updateSize();
@@ -190,7 +185,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21&&world?.length===21){
       const frame=estimateFingerFrame(world,finger,side);
-      if(root.visible&&captureFrame&&captureCenter&&cam&&frame&&frame.confidence>.35){
+      if(root.visible&&captureFrame&&cam&&frame&&frame.confidence>.35){
        // Rotate the entire reconstructed hand and the attached ring together.
        const delta=frame.quaternion.clone().multiply(captureFrame.quaternion.clone().invert());
        root.quaternion.slerp(delta,root.quaternion.angleTo(delta)>.7?.22:.38);
