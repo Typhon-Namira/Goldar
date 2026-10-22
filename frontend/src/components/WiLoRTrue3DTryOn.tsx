@@ -128,7 +128,6 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let lastAcceptedCapture=0;
    let liveFrame:ReturnType<typeof estimateFingerFrame>=null;
    let livePoints:P[]|null=null;
-   let liveSide:HandSide="Unknown";
    let lastVideo=-1,lastRequest=0,busy=false,raf=0,controller:AbortController|null=null;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
    const ctx=staging.getContext("2d");
@@ -178,7 +177,16 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       setStatus("3D calibration pending: "+(!snap?"invalid mesh geometry":!frame?"finger frame unavailable":frame.confidence<.35?"low finger confidence":"palm too small"));
       return;
      }
-     if(capturedAt<=lastAcceptedCapture||performance.now()-capturedAt>5500||liveSide!==side||!liveFrame||!livePoints||liveFrame.quaternion.angleTo(frame.quaternion)>1){snap.surface.geometry.dispose();(snap.surface.material as THREE.Material).dispose();setStatus("3D tracking: waiting for a synchronized hand pose");return;}
+     // WiLoR is CPU-bound and its capture pose is several seconds old.
+     // A large angle between capture and live MediaPipe poses is expected;
+     // transform the snapshot into the current pose instead of rejecting it.
+     // Only reject out-of-order results or a currently missing live hand.
+     if(capturedAt<=lastAcceptedCapture||!liveFrame||!livePoints){
+      snap.surface.geometry.dispose();
+      (snap.surface.material as THREE.Material).dispose();
+      setStatus("3D tracking: waiting for live hand landmarks");
+      return;
+     }
      lastAcceptedCapture=capturedAt;
      if(surface){root.remove(surface);surface.geometry.dispose();(surface.material as THREE.Material).dispose()}
      surface=snap.surface;root.add(surface);
@@ -221,7 +229,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21&&world?.length===21){
       const frame=estimateFingerFrame(world,finger,side);
-      if(frame&&frame.confidence>.35){liveFrame=frame;livePoints=points.map(p=>({...p}));liveSide=side;}
+      if(frame&&frame.confidence>.35){liveFrame=frame;livePoints=points.map(p=>({...p}));}
       if(root.visible&&captureFrame&&cam&&frame&&frame.confidence>.35){
        // Rotate the entire reconstructed hand and the attached ring together.
        const delta=frame.quaternion.clone().multiply(captureFrame.quaternion.clone().invert());
