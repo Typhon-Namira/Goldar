@@ -205,7 +205,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      root.position.copy(target.sub(ringPivot.position.clone().applyQuaternion(root.quaternion)));
      root.visible=true;
      updateSize();
-     setStatus("3D MANO active · "+hand.mesh.vertices.length+" vertices · WiLoR "+Math.round(result.inferenceMs)+" ms");
+     setStatus("3D MANO active · "+(hand.mesh?.vertices.length??0)+" vertices · WiLoR "+Math.round(result.inferenceMs)+" ms");
     }catch(e){if(!disposed)setStatus("WiLoR waiting: "+(e instanceof Error?e.message:"network error"))}
     finally{busy=false;controller=null}
    };
