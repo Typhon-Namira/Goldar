@@ -1,0 +1,13 @@
+# Third-party checkpoints and non-redistributable MANO data must never enter Goldar.
+*.ckpt
+*.pt
+*.pth
+*.pkl
+pretrained_models/
+mano_data/
+WiLoR/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.mov
