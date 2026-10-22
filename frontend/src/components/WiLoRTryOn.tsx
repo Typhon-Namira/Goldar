@@ -27,6 +27,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
  const [finger,setFinger]=useState<FingerName>("ring"),[facing,setFacing]=useState<"user"|"environment">("environment");
  const [fit,setFit]=useState(1),[widthCalibration,setWidthCalibration]=useState(1);
  const [occlusion,setOcclusion]=useState(true),[serverLatency,setServerLatency]=useState<number|null>(null);
+ const [meshStatus,setMeshStatus]=useState("Mesh: waiting for WiLoR");
  const stop=useCallback(()=>{cleanupRef.current();cleanupRef.current=()=>{};setRunning(false)},[]);
  useEffect(()=>()=>cleanupRef.current(),[]);
  const start=useCallback(async()=>{
@@ -57,6 +58,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const handMesh=createHandMeshOccluder();scene.add(handMesh);
    let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number}|null=null;
    let latestPoints:Point[]|null=null;
+   let lastMeshUpdate=0;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
    const ctx=staging.getContext("2d");
    let raf=0,lastVideoTime=-1,lastTracked=0,lastServerSent=0,serverBusy=false,controller:AbortController|null=null;
@@ -90,9 +92,13 @@ export default function WiLoRTryOn({product}:{product:Product}){
      if(disposed)return;
      setServerLatency(result.inferenceMs);
      const hand=result.hands?.[0];
-     if(!hand||hand.landmarks?.length!==21)return;
+     if(!hand||hand.landmarks?.length!==21){setMeshStatus("Mesh: no hand detected");meshSnapshot=null;return;}
      if(hand.mesh?.available&&hand.mesh.vertices?.length&&hand.mesh.faces?.length){
       meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt:performance.now()};
+      setMeshStatus(`Mesh: ${hand.mesh.vertices.length} vertices / ${hand.mesh.faces.length} faces`);
+     }else{
+      meshSnapshot=null;
+      setMeshStatus("Mesh unavailable: "+((hand.mesh as (RemoteHandMesh & {reason?:string})|undefined)?.reason||"API did not return geometry"));
      }
      // The server result corresponds to the captured frame, not the current frame.
      const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side,hand.worldLandmarks);
@@ -148,11 +154,11 @@ export default function WiLoRTryOn({product}:{product:Product}){
     handMesh.visible=false;
     if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&now-meshSnapshot.capturedAt<6000){
      const fingerJoint=({index:5,middle:9,ring:13,pinky:17} as const)[finger];
-     const valid=updateHandMeshOccluder({
+     const valid=now-lastMeshUpdate<65&&handMesh.visible?true:updateHandMeshOccluder({
       mesh:handMesh,remote:meshSnapshot.mesh,remoteLandmarks:meshSnapshot.landmarks,
       liveLandmarks:latestPoints,toScreen,width:w,height:h,fingerJoint,
      });
-     if(valid)occluder.visible=false;
+     if(valid){occluder.visible=false;lastMeshUpdate=now;}
     }
     renderer.render(scene,camera);
    };
@@ -170,7 +176,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
   <div className="tryon-viewport">
    <video ref={videoRef} autoPlay muted playsInline className={"tryon-video "+(facing==="user"?"mirror":"")}/>
    <canvas ref={canvasRef} className={"tryon-canvas "+(facing==="user"?"mirror":"")}/>
-   <div className="tryon-status" role="status">{status}{serverLatency!==null?" · WiLoR "+Math.round(serverLatency)+" ms":""}</div>
+   <div className="tryon-status" role="status">{status}{serverLatency!==null?" · WiLoR "+Math.round(serverLatency)+" ms":""}{" · "+meshStatus}</div>
   </div>
   <div className="tryon-controls">
    <div className="tryon-controlrow">
