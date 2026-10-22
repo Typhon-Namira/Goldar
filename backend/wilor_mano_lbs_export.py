@@ -118,3 +118,36 @@ def export_mano_lbs(model, betas, local_rotations):
         },
         "requiresModelToCameraTransform": True,
     }
+
+
+def extract_wilor_local_rotations(out):
+    """Extract a 16-joint rotation stack without inventing a pose convention.
+
+    The WiLoR payload's globalOrient and handPose may be matrices or
+    flattened matrices depending on the installed model version. This
+    adapter only accepts verified 3x3 matrices. It does not silently
+    reinterpret axis-angle vectors as rotations.
+    """
+    if "pred_mano_params" not in out:
+        raise ValueError("WiLoR output missing pred_mano_params")
+    params = out["pred_mano_params"]
+    global_orient = _numpy(params["global_orient"]).reshape(-1, 3, 3)
+    hand_pose = _numpy(params["hand_pose"]).reshape(-1, 3, 3)
+    if global_orient.shape != (1, 3, 3) or hand_pose.shape != (15, 3, 3):
+        raise ValueError("WiLoR MANO pose must contain 1+15 rotation matrices")
+    return _rotation_array(np.concatenate([global_orient, hand_pose], axis=0))
+
+
+def export_wilor_frame_lbs(model, out):
+    """Build optional MANO payload for one WiLoR output.
+
+    IMPORTANT: `model` is the actual MANO layer, NOT the WiLoR network.
+    The caller must verify the correct left/right model, units and
+    coordinate transforms. Do not call this with an unverified model.
+    """
+    params = out.get("pred_mano_params")
+    if params is None or "betas" not in params:
+        raise ValueError("WiLoR output missing MANO betas")
+    betas = _numpy(params["betas"]).reshape(-1)
+    rotations = extract_wilor_local_rotations(out)
+    return export_mano_lbs(model, betas, rotations)
