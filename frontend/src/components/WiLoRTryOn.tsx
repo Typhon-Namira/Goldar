@@ -1,11 +1,12 @@
 "use client";
 import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
-import {PoseSmoother,type FingerName,type HandSide} from "@/lib/handPose";
+import {PoseSmoother,estimateFingerFrame,type FingerName,type HandSide} from "@/lib/handPose";
 import {solveCameraRingPose} from "@/lib/cameraRingGeometry";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {createFingerOccluder,resizeFingerOccluder} from "@/lib/fingerOcclusion";
 import {createHandMeshOccluder,updateHandMeshOccluder,type RemoteHandMesh} from "@/lib/handMeshOcclusion";
+import {solveMetricRingFrame} from "@/lib/metricRingFrame";
 
 type Point={x:number;y:number;z:number};
 type ServerHand={side:"Left"|"Right";landmarks:Point[];worldLandmarks:Point[];mesh?:RemoteHandMesh};
@@ -56,14 +57,15 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const occluder=createFingerOccluder(diameter);occluder.visible=false;anchor.add(occluder);
    const smoother=new PoseSmoother();
    const handMesh=createHandMeshOccluder();scene.add(handMesh);
-   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number}|null=null;
+   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number;captureWorld:Point[];captureSide:HandSide}|null=null;
    let latestPoints:Point[]|null=null;
-   let lastMeshUpdate=0;
-   let lastMeshValid=false;
+   let latestMetric:{anchorDepth:number;pixelsPerMeter:number}|null=null;
+   
+   let latestLiveTime=0;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
    const ctx=staging.getContext("2d");
    let raf=0,lastVideoTime=-1,lastTracked=0,lastServerSent=0,serverBusy=false,controller:AbortController|null=null;
-   let correction:{dx:number;dy:number;scale:number;time:number}|null=null;
+   
    
    const toScreen=(p:Point)=>{
     const w=canvas.clientWidth,h=canvas.clientHeight,vw=video.videoWidth||w,vh=video.videoHeight||h;
@@ -77,10 +79,12 @@ export default function WiLoRTryOn({product}:{product:Product}){
      widthCalibration,reportedSide:side,cameraFacing:facing,
      worldLandmarks:world,previousQuaternion:smoother.ready?smoother.rotation:undefined});
    };
-   const sendCorrection=async(points:Point[],side:HandSide,now:number)=>{
+   const sendCorrection=async(points:Point[],side:HandSide,now:number,world?:Point[])=>{
     if(!ENDPOINT||!ctx||serverBusy||now-lastServerSent<3500)return;
     serverBusy=true;lastServerSent=now;
     ctx.drawImage(video,0,0,staging.width,staging.height);
+    const capturedAt=performance.now();
+    const captureWorld=world?.map(p=>({...p}))??[];
     const blob=await new Promise<Blob|null>(resolve=>staging.toBlob(resolve,"image/jpeg",.65));
     if(!blob||disposed){serverBusy=false;return}
     const form=new FormData();form.append("frame",blob,"frame.jpg");form.append("include_mesh","true");
@@ -95,21 +99,13 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21){setMeshStatus("Mesh: no hand detected");meshSnapshot=null;return;}
      if(hand.mesh?.available&&hand.mesh.vertices?.length&&hand.mesh.faces?.length){
-      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt:performance.now()};
+      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt,captureWorld,captureSide:side};
       setMeshStatus(`Mesh: ${hand.mesh.vertices.length} vertices / ${hand.mesh.faces.length} faces`);
      }else{
       meshSnapshot=null;
       setMeshStatus("Mesh unavailable: "+((hand.mesh as (RemoteHandMesh & {reason?:string})|undefined)?.reason||"API did not return geometry"));
      }
-     // The server result corresponds to the captured frame, not the current frame.
-     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side,hand.worldLandmarks);
-     if(!localPose||!remotePose)return;
-     const dx=remotePose.position.x-localPose.position.x,dy=remotePose.position.y-localPose.position.y;
-     const ratio=remotePose.scale/localPose.scale;
-     // Never allow a stale or divergent server estimate to throw the ring.
-     if(Math.hypot(dx,dy)<18&&ratio>.9&&ratio<1.1){
-      correction={dx,dy,scale:ratio,time:performance.now()};
-     }
+
     }catch(e){if(!disposed)console.warn("WiLoR correction unavailable; continuing local tracking",e)}
     finally{clearTimeout(timeout);controller=null;serverBusy=false}
    };
@@ -129,39 +125,53 @@ export default function WiLoRTryOn({product}:{product:Product}){
      if(points?.length===21){
 
       latestPoints=points;
+      latestLiveTime=now;
       const world=detection.worldLandmarks?.[0] as Point[]|undefined;
       const solved=solve(points,side,world);
       if(solved){
        const position=solved.position.clone(),scale=solved.scale;
-       // Server result only makes small bounded adjustments; decay it rapidly.
-       let adjustedScale=scale;
-       if(correction){
-        const weight=Math.max(0,1-(now-correction.time)/1000)*.06;
-        position.x+=correction.dx*weight;position.y+=correction.dy*weight;
-        adjustedScale*=1+(correction.scale-1)*weight;
+       // WiLoR metric camera-space joints provide 3D rotation;
+       // live MediaPipe continues to drive 2D translation every frame.
+       const metric=meshSnapshot&&now-meshSnapshot.capturedAt<4500&&
+        meshSnapshot.landmarks.length===21
+        ?solveMetricRingFrame({
+         finger,landmarks:meshSnapshot.landmarks,mesh:meshSnapshot.mesh,
+         toScreen,width:w,height:h,diameter,fitMultiplier:fit*(product.scale||1),
+         anchorFraction:product.ring_calibration?.anchorFraction??.52,
+         previous:smoother.ready?smoother.rotation:undefined
+        }):null;
+       let metricRotation=metric?.quaternion;
+       if(metricRotation&&meshSnapshot?.captureWorld.length===21&&world?.length===21){
+        const captured=estimateFingerFrame(meshSnapshot.captureWorld,finger,meshSnapshot.captureSide);
+        const live=estimateFingerFrame(world,finger,side);
+        if(captured&&live&&captured.confidence>.35&&live.confidence>.35){
+         const delta=live.quaternion.clone().multiply(captured.quaternion.clone().invert());
+         metricRotation=delta.multiply(metricRotation).normalize();
+        }
        }
-       if(smoother.update(position,solved.quaternion,adjustedScale,now)){
+       latestMetric=metric?{anchorDepth:metric.anchorDepth,pixelsPerMeter:metric.pixelsPerMeter}:null;
+       if(smoother.update(position,metricRotation??solved.quaternion,scale,now)){
         anchor.position.copy(smoother.position);anchor.quaternion.copy(smoother.rotation);
         anchor.scale.setScalar(smoother.scale);anchor.visible=true;lastTracked=now;
         occluder.visible=occlusion;
         if(occlusion)resizeFingerOccluder(occluder,solved.fingerWidthPx,smoother.scale,diameter);
        }
       }
-      void sendCorrection(points,side,now);
+      void sendCorrection(points,side,now,world);
      }
     }
     // Allow a brief detector dropout; never tie visibility to slow server calls.
-    if(now-lastTracked>850){anchor.visible=false;smoother.reset();latestPoints=null;lastMeshValid=false}
+    if(now-lastTracked>850){anchor.visible=false;smoother.reset();latestPoints=null;latestMetric=null;}
     handMesh.visible=false;
-    if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&now-meshSnapshot.capturedAt<4500){
+    if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&latestMetric&&now-latestLiveTime<150&&now-meshSnapshot.capturedAt<4500){
      const fingerJoint=({index:5,middle:9,ring:13,pinky:17} as const)[finger];
-     const valid=now-lastMeshUpdate<65&&lastMeshValid?true:updateHandMeshOccluder({
+     const valid=updateHandMeshOccluder({
       mesh:handMesh,remote:meshSnapshot.mesh,remoteLandmarks:meshSnapshot.landmarks,
       liveLandmarks:latestPoints,toScreen,width:w,height:h,fingerJoint,
       ringWidthPx:Math.max(8,smoother.scale*diameter),
+      metricDepth:latestMetric??undefined,
      });
-     lastMeshValid=valid;
-     if(valid){occluder.visible=false;lastMeshUpdate=now;}else handMesh.visible=false;
+     if(valid){occluder.visible=false;}else handMesh.visible=false;
     }
     renderer.render(scene,camera);
    };

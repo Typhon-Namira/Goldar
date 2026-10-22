@@ -29,6 +29,7 @@ export function updateHandMeshOccluder(args:{
  remoteLandmarks:readonly MeshPoint[];liveLandmarks:readonly MeshPoint[];
  toScreen:(p:MeshPoint)=>Pixel;width:number;height:number;
  fingerJoint:number;ringDepthOffsetPx?:number;ringWidthPx?:number;
+ metricDepth?:{anchorDepth:number;pixelsPerMeter:number};
 }):boolean{
  const {mesh,remote,remoteLandmarks,liveLandmarks,toScreen,width,height,fingerJoint}=args;
  const cam=remote.camera;
@@ -85,7 +86,8 @@ export function updateHandMeshOccluder(args:{
  const fingerWidth=Math.max(8,args.ringWidthPx||handWidth*.22);
  // Scale metric WiLoR depth to a conservative on-screen finger radius.
  // Z=0 is the ring's mounting plane, negative Z is farther from camera.
- const depthScale=fingerWidth/Math.max(0.012,center.z*0.12);
+ const depthScale=args.metricDepth?.pixelsPerMeter??fingerWidth/Math.max(0.012,center.z*0.12);
+ const depthCenter=args.metricDepth?.anchorDepth??center.z;
  const displacements=JOINTS.map(i=>{
   const p=rigid(source[i]);return {x:target[i].x-p.x,y:target[i].y-p.y};
  });
@@ -106,8 +108,9 @@ export function updateHandMeshOccluder(args:{
   const oy=THREE.MathUtils.clamp(wy/sum,-maxShift,maxShift);
   positions[i*3]=r.x+ox-width/2;
   positions[i*3+1]=height/2-(r.y+oy);
-  positions[i*3+2]=THREE.MathUtils.clamp((center.z-v[2])*depthScale,
-   -fingerWidth*.55,fingerWidth*.55)-(args.ringDepthOffsetPx??0);
+  positions[i*3+2]=args.metricDepth
+   ?THREE.MathUtils.clamp((depthCenter-v[2])*depthScale,-fingerWidth*1.2,fingerWidth*1.2)
+   :THREE.MathUtils.clamp((depthCenter-v[2])*depthScale,-fingerWidth*.55,fingerWidth*.55)-(args.ringDepthOffsetPx??0);
  }
  const indices:number[]=[];
  for(const face of remote.faces){

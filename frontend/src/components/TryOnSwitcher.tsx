@@ -3,9 +3,10 @@ import {useMemo,useState} from "react";
 import type {Product} from "@/lib/api";
 import HandTryOn from "@/components/HandTryOn";
 import WiLoRTryOn from "@/components/WiLoRTryOn";
-type Engine="webar"|"legacy"|"wilor";
+import WiLoRTrue3DTryOn from "@/components/WiLoRTrue3DTryOn";
+type Engine="webar"|"legacy"|"wilor"|"true3d";
 export default function TryOnSwitcher({product}:{product:Product}){
- const [engine,setEngine]=useState<Engine>("wilor");
+ const [engine,setEngine]=useState<Engine>("true3d");
  const [running,setRunning]=useState(false);
  const [version,setVersion]=useState(0);
  const [scale,setScale]=useState(.421);
@@ -20,11 +21,12 @@ export default function TryOnSwitcher({product}:{product:Product}){
    <div className="tryon-controlrow">
     <button type="button" className={"btn "+(engine==="webar"?"gold":"ghost")} onClick={()=>switchEngine("webar")}>WEBAR.ROCKS — EXPERIMENTAL</button>
     <button type="button" className={"btn "+(engine==="legacy"?"gold":"ghost")} onClick={()=>switchEngine("legacy")}>MEDIAPIPE — OLD</button>
-    <button type="button" className={"btn "+(engine==="wilor"?"gold":"ghost")} onClick={()=>switchEngine("wilor")}>HYBRID — MEDIAPIPE + WiLoR</button>
+    <button type="button" className={"btn "+(engine==="wilor"?"gold":"ghost")} onClick={()=>switchEngine("wilor")}>HYBRID — LEGACY</button>
+    <button type="button" className={"btn "+(engine==="true3d"?"gold":"ghost")} onClick={()=>switchEngine("true3d")}>TRUE 3D — WiLoR MANO</button>
    </div>
-   <p className="tryon-disclaimer">Hybrid mode uses MediaPipe for live tracking and WiLoR for occasional server corrections. WebAR.rocks runs separately as a fallback because its isolated camera tracker cannot share pose data directly.</p>
+   <p className="tryon-disclaimer">True 3D uses a calibrated perspective camera and one metric depth buffer for the hand mesh and ring. WebAR.rocks runs separately as a fallback because its isolated camera tracker cannot share pose data directly.</p>
   </div>
-  {engine==="legacy"?<HandTryOn key={"old-"+version} product={product}/>:engine==="wilor"?<WiLoRTryOn key={"wilor-"+version} product={product}/>:<>
+  {engine==="legacy"?<HandTryOn key={"old-"+version} product={product}/>:engine==="wilor"?<WiLoRTryOn key={"wilor-"+version} product={product}/>:engine==="true3d"?<WiLoRTrue3DTryOn key={"true3d-"+version} product={product}/>:<>
    {!running?<div className="tryon-viewport" style={{minHeight:400,display:"grid",placeItems:"center",padding:22,textAlign:"center"}}>
      <div><h3>Goldar Ring Engine V4</h3><p>Test the WebAR.rocks ring tracker with this product.</p>
      <button type="button" className="btn gold" onClick={()=>setRunning(true)}>START WEBAR TRY-ON →</button></div>
