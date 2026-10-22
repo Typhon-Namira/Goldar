@@ -52,6 +52,19 @@ def _parent_indices(kintree):
     return parents
 
 
+def _model_parents(model):
+    """Prefer smplx.MANOLayer.parents; support legacy kintree only if needed."""
+    value = getattr(model, "parents", None)
+    if value is None:
+        return _parent_indices(model.kintree_table)
+    parents = _numpy(value).astype(np.int64).reshape(-1).tolist()
+    if len(parents) != 16 or parents[0] != -1 or any(
+        p < 0 or p >= i for i, p in enumerate(parents) if i > 0
+    ):
+        raise ValueError("Invalid MANO parents")
+    return parents
+
+
 def export_mano_lbs(model, betas, local_rotations):
     """Build the frontend ManoRig + ManoPose inputs from matching MANO data.
 
@@ -109,7 +122,7 @@ def export_mano_lbs(model, betas, local_rotations):
             "shapeOffsets": shape_offsets.tolist(),
             "poseOffsets": pose_offsets.tolist(),
             "restJoints": joints.tolist(),
-            "parents": _parent_indices(model.kintree_table),
+            "parents": _model_parents(model),
             "weights": weights.tolist(),
         },
         "pose": {
@@ -204,6 +217,8 @@ def resolve_wilor_mano_layer(wilor_model):
     required = ("v_template", "shapedirs", "posedirs", "J_regressor",
                 "lbs_weights")
     missing = [name for name in required if getattr(layer, name, None) is None]
+    if getattr(layer, "parents", None) is None and getattr(layer, "kintree_table", None) is None:
+        missing.append("parents/kintree_table")
     if missing:
         raise ValueError("WiLoR MANO layer missing: " + ", ".join(missing))
     return layer
@@ -213,3 +228,66 @@ def export_loaded_wilor_lbs(wilor_model, out):
     """Export from the verified self.mano layer, never a guessed layer."""
     layer = resolve_wilor_mano_layer(wilor_model)
     return export_wilor_frame_lbs(layer, out)
+
+
+def compare_wilor_mano_vertices(wilor_model, out):
+    """Compare canonical MANO LBS reconstruction with native WiLoR output.
+
+    Returns metrics only; never logs model assets or images. Uses the same
+    original SMPL-X MANOLayer forward pass as WiLoR with pose2rot=False.
+    No camera-space mirroring/translation is applied to either result.
+    """
+    import torch
+
+    layer = resolve_wilor_mano_layer(wilor_model)
+    params = out.get("pred_mano_params")
+    if not isinstance(params, dict) or "pred_vertices" not in out:
+        raise ValueError("Missing WiLoR prediction data")
+
+    payload = export_wilor_frame_lbs(layer, out)
+    rig, pose = payload["rig"], payload["pose"]
+    rest = np.asarray(rig["templateVertices"], dtype=np.float64)
+    rest += np.asarray(rig["shapeOffsets"], dtype=np.float64)
+    rest += np.asarray(rig["poseOffsets"], dtype=np.float64)
+    joints = np.asarray(rig["restJoints"], dtype=np.float64)
+    weights = np.asarray(rig["weights"], dtype=np.float64)
+    rotations = np.asarray(pose["localPose"], dtype=np.float64)
+    parents = rig["parents"]
+    global_rest = []
+    global_pose = []
+    for i, parent in enumerate(parents):
+        local_rest = np.eye(4)
+        local_pose = np.eye(4)
+        offset = joints[i] if parent < 0 else joints[i] - joints[parent]
+        local_rest[:3, 3] = offset
+        local_pose[:3, 3] = offset
+        local_pose[:3, :3] = rotations[i]
+        if parent < 0:
+            global_rest.append(local_rest)
+            global_pose.append(local_pose)
+        else:
+            global_rest.append(global_rest[parent] @ local_rest)
+            global_pose.append(global_pose[parent] @ local_pose)
+    transforms = np.stack([
+        global_pose[i] @ np.linalg.inv(global_rest[i]) for i in range(16)
+    ])
+    homogeneous = np.concatenate([rest, np.ones((778, 1))], axis=1)
+    posed = np.einsum("vj,jab,vb->va", weights, transforms, homogeneous)[:, :3]
+
+    # Compare with native MANO output as a separate guard against
+    # WiLoR's extra processing and the wrapper's 21-joint remapping.
+    with torch.inference_mode():
+        native = layer(**params, pose2rot=False).vertices[0].detach().cpu().numpy()
+    predicted = out["pred_vertices"][0].detach().cpu().numpy()
+    if native.shape != (778, 3) or predicted.shape != (778, 3):
+        raise ValueError("Unexpected MANO vertex count")
+    diff_native = np.linalg.norm(posed - native, axis=1)
+    diff_wilor = np.linalg.norm(posed - predicted, axis=1)
+    return {
+        "lbsVsNativeMaxMm": float(diff_native.max() * 1000),
+        "lbsVsNativeMeanMm": float(diff_native.mean() * 1000),
+        "lbsVsWilorMaxMm": float(diff_wilor.max() * 1000),
+        "lbsVsWilorMeanMm": float(diff_wilor.mean() * 1000),
+        "passesOneMillimeterNative": bool(diff_native.max() < .001),
+        "passesOneMillimeterWilor": bool(diff_wilor.max() < .001),
+    }
