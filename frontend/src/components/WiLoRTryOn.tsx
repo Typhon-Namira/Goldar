@@ -1,7 +1,7 @@
 "use client";
 import {useCallback,useEffect,useRef,useState} from "react";
 import type {Product} from "@/lib/api";
-import {PoseSmoother,type FingerName,type HandSide} from "@/lib/handPose";
+import {PoseSmoother,estimateFingerFrame,type FingerName,type HandSide} from "@/lib/handPose";
 import {solveCameraRingPose} from "@/lib/cameraRingGeometry";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {createFingerOccluder,resizeFingerOccluder} from "@/lib/fingerOcclusion";
@@ -57,7 +57,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const occluder=createFingerOccluder(diameter);occluder.visible=false;anchor.add(occluder);
    const smoother=new PoseSmoother();
    const handMesh=createHandMeshOccluder();scene.add(handMesh);
-   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number}|null=null;
+   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number;captureWorld:Point[];captureSide:HandSide}|null=null;
    let latestPoints:Point[]|null=null;
    let latestMetric:{anchorDepth:number;pixelsPerMeter:number}|null=null;
    let lastMeshUpdate=0;
@@ -80,11 +80,12 @@ export default function WiLoRTryOn({product}:{product:Product}){
      widthCalibration,reportedSide:side,cameraFacing:facing,
      worldLandmarks:world,previousQuaternion:smoother.ready?smoother.rotation:undefined});
    };
-   const sendCorrection=async(points:Point[],side:HandSide,now:number)=>{
+   const sendCorrection=async(points:Point[],side:HandSide,now:number,world?:Point[])=>{
     if(!ENDPOINT||!ctx||serverBusy||now-lastServerSent<3500)return;
     serverBusy=true;lastServerSent=now;
     ctx.drawImage(video,0,0,staging.width,staging.height);
     const capturedAt=performance.now();
+    const captureWorld=world?.map(p=>({...p}))??[];
     const blob=await new Promise<Blob|null>(resolve=>staging.toBlob(resolve,"image/jpeg",.65));
     if(!blob||disposed){serverBusy=false;return}
     const form=new FormData();form.append("frame",blob,"frame.jpg");form.append("include_mesh","true");
@@ -99,7 +100,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21){setMeshStatus("Mesh: no hand detected");meshSnapshot=null;return;}
      if(hand.mesh?.available&&hand.mesh.vertices?.length&&hand.mesh.faces?.length){
-      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt};
+      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt,captureWorld,captureSide:side};
       setMeshStatus(`Mesh: ${hand.mesh.vertices.length} vertices / ${hand.mesh.faces.length} faces`);
      }else{
       meshSnapshot=null;
@@ -148,7 +149,15 @@ export default function WiLoRTryOn({product}:{product:Product}){
          anchorFraction:product.ring_calibration?.anchorFraction??.52,
          previous:smoother.ready?smoother.rotation:undefined
         }):null;
-       const metricRotation=metric?.quaternion;
+       let metricRotation=metric?.quaternion;
+       if(metricRotation&&meshSnapshot?.captureWorld.length===21&&world?.length===21){
+        const captured=estimateFingerFrame(meshSnapshot.captureWorld,finger,meshSnapshot.captureSide);
+        const live=estimateFingerFrame(world,finger,side);
+        if(captured&&live&&captured.confidence>.35&&live.confidence>.35){
+         const delta=live.quaternion.clone().multiply(captured.quaternion.clone().invert());
+         metricRotation=delta.multiply(metricRotation).normalize();
+        }
+       }
        latestMetric=metric?{anchorDepth:metric.anchorDepth,pixelsPerMeter:metric.pixelsPerMeter}:null;
        // Server result only makes small bounded adjustments; decay it rapidly.
        let adjustedScale=scale;
@@ -164,7 +173,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
         if(occlusion)resizeFingerOccluder(occluder,solved.fingerWidthPx,smoother.scale,diameter);
        }
       }
-      void sendCorrection(points,side,now);
+      void sendCorrection(points,side,now,world);
      }
     }
     // Allow a brief detector dropout; never tie visibility to slow server calls.
