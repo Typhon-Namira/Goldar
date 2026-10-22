@@ -9,6 +9,7 @@ import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {UnifiedHandTrack,cameraProjection,type Joint} from "@/lib/unifiedHandTrack";
 import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
 import {parseManoSnapshot,type ManoSnapshot} from "@/lib/manoSnapshot";
+import {skinMano,type ManoRig,type ManoPose} from "@/lib/manoLbs";
 
 type LbsPayload={schemaVersion:number;rig:ManoRig;pose:ManoPose;requiresModelToCameraTransform:boolean};
 type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown;manoLbs?:LbsPayload};
