@@ -8,8 +8,9 @@ import type {FingerName,HandSide} from "@/lib/handPose";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {UnifiedHandTrack,cameraProjection,type Joint} from "@/lib/unifiedHandTrack";
 import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
+import {parseManoSnapshot,type ManoSnapshot} from "@/lib/manoSnapshot";
 
-type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh};
+type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown};
 type RemoteResult={hands?:RemoteHand[];inferenceMs?:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
 const MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -50,7 +51,10 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    const light=new THREE.DirectionalLight(0xffffff,2);light.position.set(1,2,1);scene.add(light);
    const ringPivot=new THREE.Group();ringPivot.add(ring);ringPivot.visible=false;scene.add(ringPivot);
    let track:UnifiedHandTrack|null=null;
+   let fittedDiameter=0;
+   let latestMano:ManoSnapshot|null=null;
    let lastVideo=-1,lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
+   let lastMeshCapture=0;
    let busy=false,raf=0,controller:AbortController|null=null;
    let currentLive:Joint[]|null=null,liveTimestamp=0;
    const stage=document.createElement("canvas");stage.width=480;stage.height=360;
@@ -67,12 +71,22 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     if(track){scene.remove(track.occluder);track.dispose()}
     track=next;scene.add(next.occluder);
     const physicalDiameter=next.ringRadius*2*1.06*fit;
+    fittedDiameter=physicalDiameter;
     ringPivot.scale.setScalar(physicalDiameter/Math.max(.00001,calibration.innerDiameter));
     updateSize();
    };
    const fetchMesh=async(live:Joint[],side:HandSide,now:number)=>{
     if(busy||!ctx||now-lastRequest<3500)return;
     busy=true;lastRequest=now;
+    // Capture the complete camera frame with its native aspect ratio.
+    // MediaPipe normalized landmarks and WiLoR pixels must refer to the
+    // same uncropped image, including portrait mobile video.
+    const captureWidth=480;
+    const captureHeight=Math.max(1,Math.round(captureWidth*video.videoHeight/video.videoWidth));
+    if(!Number.isFinite(captureHeight)||!video.videoWidth)return;
+    if(stage.width!==captureWidth||stage.height!==captureHeight){
+     stage.width=captureWidth;stage.height=captureHeight;
+    }
     ctx.drawImage(video,0,0,stage.width,stage.height);
     const captured=performance.now();
     const captureLandmarks=live.map(p=>({...p}));
@@ -98,7 +112,11 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      }
      // Keep the existing track if it is healthy: asynchronous mesh replacements
      // must not reset ring orientation or shift the ring every 3.5 seconds.
-     if(track&&performance.now()-lastGood<750)return;
+     if(captured<=lastMeshCapture)return;
+     // Preserve active tracking; a delayed server snapshot must not
+     // reset a stable ring attachment.
+     // A newer capture refreshes MANO shape/depth; keep the previous ring\n     // transform as the continuity prior instead of discarding every update.
+     const parsedMano=parseManoSnapshot(hand.mano);
      const next=new UnifiedHandTrack(hand.mesh,hand.landmarks,finger,hand.side,captured);
      if(!next.update(captureLandmarks,captured)){
       next.dispose();if(!track)setStatus("Waiting for consistent 3D calibration");return;
@@ -106,8 +124,11 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(currentLive&&!next.update(currentLive,performance.now())){
       next.dispose();if(!track)setStatus("Waiting for stable finger pose");return;
      }
-     replaceTrack(next);
-     setStatus("3D active · MANO "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
+     if(track){\n      next.ringPosition.copy(track.ringPosition);\n      next.ringRotation.copy(track.ringRotation);\n     }\n     replaceTrack(next);
+     lastMeshCapture=captured;
+     latestMano=parsedMano;
+     setStatus("3D active · "+(latestMano?"MANO parameters validated":"mesh fallback")+
+      " · "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
     }catch(e){if(!disposed&&!track)setStatus("WiLoR: "+(e instanceof Error?e.message:"network error"))}
     finally{busy=false;controller=null}
    };
@@ -129,6 +150,11 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
        if(track&&track.update(points,now)){
         ringPivot.position.copy(track.ringPosition);
         ringPivot.quaternion.copy(track.ringRotation);
+        // Follow the same deforming surface used for ring position.
+        const desired=track.ringRadius*2*1.06*fit;
+        fittedDiameter=THREE.MathUtils.lerp(fittedDiameter,
+         THREE.MathUtils.clamp(desired,fittedDiameter*.985,fittedDiameter*1.015),.2);
+        ringPivot.scale.setScalar(fittedDiameter/Math.max(.00001,calibration.innerDiameter));
         ringPivot.visible=true;track.occluder.visible=true;
         lastGood=now;
        }

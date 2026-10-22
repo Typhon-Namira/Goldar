@@ -51,7 +51,9 @@ export class UnifiedHandTrack {
  readonly current:THREE.Vector3[]=[];
  readonly finger:FingerName;
  readonly side:HandSide;
- readonly ringRadius:number;
+ ringRadius:number;
+ private readonly fingerVertexIds:number[]=[];
+ private filteredDepth=0;
  readonly createdAt:number;
  lastSeen=0;
  private lastInput=0;
@@ -82,6 +84,19 @@ export class UnifiedHandTrack {
   }).sort((a,b)=>a-b);
   this.ringRadius=clamp(radii.length>=8?
    radii[Math.floor(radii.length*.35)]:.009,.0065,.0125);
+  // Cache only MANO vertices belonging to the selected proximal phalanx.
+  // A generic slice through the whole hand includes palm and other fingers.
+  const [mcp,pip]=BONES[finger];
+  const bone=this.source[pip].clone().sub(this.source[mcp]);
+  const boneLength=bone.length();
+  const boneAxis=bone.clone().normalize();
+  for(let i=0;i<this.initial.length;i++){
+   const offset=this.initial[i].clone().sub(this.source[mcp]);
+   const t=offset.dot(boneAxis);
+   const radial=offset.addScaledVector(boneAxis,-t).length();
+   if(t>boneLength*.14&&t<boneLength*.8&&radial<.017)
+    this.fingerVertexIds.push(i);
+  }
   this.geometry=new THREE.BufferGeometry();
   const array=new Float32Array(this.vertices.length*3);
   this.vertices.forEach((v,i)=>v.toArray(array,i*3));
@@ -130,7 +145,16 @@ export class UnifiedHandTrack {
   }
   ratios.sort((a,b)=>a-b);
   const median=ratios.length?ratios[Math.floor(ratios.length/2)]:rootDepth*referenceWidth/imageWidth;
-  const globalDepth=clamp(median,rootDepth*.65,rootDepth*1.5);
+  const estimatedDepth=clamp(median,rootDepth*.65,rootDepth*1.5);
+  if(this.filteredDepth===0)this.filteredDepth=estimatedDepth;
+  else {
+   const dt=Math.max(1,now-this.lastInput);
+   const maxStep=this.filteredDepth*.14*Math.min(dt/1000,.1);
+   const target=clamp(estimatedDepth,this.filteredDepth-maxStep,this.filteredDepth+maxStep);
+   this.filteredDepth=THREE.MathUtils.lerp(this.filteredDepth,target,
+    clamp(1-Math.exp(-dt/220),.02,.35));
+  }
+  const globalDepth=this.filteredDepth;
   const targets=live.map((p,i)=>{
    // Preserve relative MANO depth offsets; translate the hand as a whole
    // using the multi-bone estimate. Avoid interpreting MediaPipe z as meters.
@@ -151,9 +175,14 @@ export class UnifiedHandTrack {
   }
   const smoothed=fingerBasis(this.current,this.finger,this.side);
   if(!smoothed)return false;
-  this.ringPosition.copy(smoothed.position);
-  if(this.lastInput===0)this.ringRotation.copy(smoothed.quaternion);
-  else this.ringRotation.slerp(smoothed.quaternion,alpha).normalize();
+  if(this.lastInput>0){
+   const flipped=smoothed.quaternion.clone().multiply(
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI));
+   if(flipped.angleTo(this.ringRotation)<smoothed.quaternion.angleTo(this.ringRotation))
+    smoothed.quaternion.copy(flipped);
+  }
+  // Ring orientation follows the local finger bone. Position and radius
+  // are refined below using the live, articulated skin cross-section.
   const attribute=this.geometry.getAttribute("position") as THREE.BufferAttribute;
   const array=attribute.array as Float32Array;
   for(let i=0;i<this.initial.length;i++){
@@ -175,6 +204,34 @@ export class UnifiedHandTrack {
    }
    v.toArray(array,i*3);
   }
+  const crossSection:{radial:THREE.Vector3;radius:number}[]=[];
+  const center=smoothed.position.clone();
+  const axis=smoothed.axis;
+  const point=new THREE.Vector3();
+  for(const i of this.fingerVertexIds){
+   point.fromArray(array,i*3).sub(center);
+   const along=point.dot(axis);
+   if(Math.abs(along)>.004)continue;
+   const radial=point.clone().addScaledVector(axis,-along);
+   const radius=radial.length();
+   if(radius>.003&&radius<.018)crossSection.push({radial,radius});
+  }
+  let surfaceCenter=center;
+  if(crossSection.length>=10){
+   crossSection.sort((a,b)=>a.radius-b.radius);
+   const section=crossSection.slice(0,Math.max(8,Math.floor(crossSection.length*.8)));
+   const offset=new THREE.Vector3();
+   for(const v of section)offset.add(v.radial);
+   offset.multiplyScalar(1/section.length).clampLength(0,.0025);
+   surfaceCenter=center.clone().add(offset);
+   const radii=section.map(v=>v.radial.distanceTo(offset)).sort((a,b)=>a-b);
+   const measured=clamp(radii[Math.floor(radii.length*.6)],.006,.0125);
+   this.ringRadius=THREE.MathUtils.lerp(this.ringRadius,measured,alpha*.25);
+  }
+  if(this.lastInput===0)this.ringPosition.copy(surfaceCenter);
+  else this.ringPosition.lerp(surfaceCenter,alpha);
+  if(this.lastInput===0)this.ringRotation.copy(smoothed.quaternion);
+  else this.ringRotation.slerp(smoothed.quaternion,alpha).normalize();
   attribute.needsUpdate=true;
   this.geometry.computeBoundingSphere();
   this.lastSeen=now;this.lastInput=now;
