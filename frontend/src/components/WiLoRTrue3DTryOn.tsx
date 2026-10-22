@@ -66,7 +66,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    const replaceTrack=(next:UnifiedHandTrack)=>{
     if(track){scene.remove(track.occluder);track.dispose()}
     track=next;scene.add(next.occluder);
-    const physicalDiameter=next.ringRadius*2*1.08*fit*(product.scale||1);
+    const physicalDiameter=next.ringRadius*2*1.06*fit;
     ringPivot.scale.setScalar(physicalDiameter/Math.max(.00001,calibration.innerDiameter));
     updateSize();
    };
