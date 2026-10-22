@@ -53,6 +53,7 @@ export class UnifiedHandTrack {
  readonly side:HandSide;
  ringRadius:number;
  private readonly fingerVertexIds:number[]=[];
+ private filteredDepth=0;
  readonly createdAt:number;
  lastSeen=0;
  private lastInput=0;
@@ -144,7 +145,16 @@ export class UnifiedHandTrack {
   }
   ratios.sort((a,b)=>a-b);
   const median=ratios.length?ratios[Math.floor(ratios.length/2)]:rootDepth*referenceWidth/imageWidth;
-  const globalDepth=clamp(median,rootDepth*.65,rootDepth*1.5);
+  const estimatedDepth=clamp(median,rootDepth*.65,rootDepth*1.5);
+  if(this.filteredDepth===0)this.filteredDepth=estimatedDepth;
+  else {
+   const dt=Math.max(1,now-this.lastInput);
+   const maxStep=this.filteredDepth*.14*Math.min(dt/1000,.1);
+   const target=clamp(estimatedDepth,this.filteredDepth-maxStep,this.filteredDepth+maxStep);
+   this.filteredDepth=THREE.MathUtils.lerp(this.filteredDepth,target,
+    clamp(1-Math.exp(-dt/220),.02,.35));
+  }
+  const globalDepth=this.filteredDepth;
   const targets=live.map((p,i)=>{
    // Preserve relative MANO depth offsets; translate the hand as a whole
    // using the multi-bone estimate. Avoid interpreting MediaPipe z as meters.
@@ -165,6 +175,12 @@ export class UnifiedHandTrack {
   }
   const smoothed=fingerBasis(this.current,this.finger,this.side);
   if(!smoothed)return false;
+  if(this.lastInput>0){
+   const flipped=smoothed.quaternion.clone().multiply(
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI));
+   if(flipped.angleTo(this.ringRotation)<smoothed.quaternion.angleTo(this.ringRotation))
+    smoothed.quaternion.copy(flipped);
+  }
   // Ring orientation follows the local finger bone. Position and radius
   // are refined below using the live, articulated skin cross-section.
   const attribute=this.geometry.getAttribute("position") as THREE.BufferAttribute;
