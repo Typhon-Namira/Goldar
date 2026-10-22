@@ -87,7 +87,8 @@ export default function WiLoRTryOn({product}:{product:Product}){
      setServerLatency(result.inferenceMs);
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21)return;
-     // The server result corresponds to the captured frame, not the current frame.\n     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side);
+     // The server result corresponds to the captured frame, not the current frame.
+     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side);
      if(!localPose||!remotePose)return;
      const dx=remotePose.position.x-localPose.position.x,dy=remotePose.position.y-localPose.position.y;
      const ratio=remotePose.scale/localPose.scale;
