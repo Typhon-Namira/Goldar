@@ -80,7 +80,7 @@ export function updateHandMeshOccluder(args:{
  const center=remoteLandmarks[fingerJoint];
  if(!center||!Number.isFinite(center.z)||center.z<=0)return false;
  const positions=new Float32Array(base.length*3);
- const depthScale=Math.max(1,Math.min(width,height))*0.7/center.z;
+ const depthScale=Math.min(width,height)*0.28/center.z;
  for(let i=0;i<base.length;i++){
   const v=base[i],p=project(v);
   if(!p)return false;
@@ -89,7 +89,7 @@ export function updateHandMeshOccluder(args:{
   positions[i*3+1]=height/2-(si*x+co*y+by);
   // Ring lives on z=0. Keep skin surface conservatively behind the
   // jewelry's center; geometry still masks farther parts of the band.
-  positions[i*3+2]=(center.z-v[2])*depthScale- (args.ringDepthOffsetPx??5);
+  positions[i*3+2]=THREE.MathUtils.clamp((center.z-v[2])*depthScale,-12,12)-(args.ringDepthOffsetPx??1.5);
  }
  const indices:number[]=[];
  for(const face of remote.faces){
@@ -97,13 +97,16 @@ export function updateHandMeshOccluder(args:{
   // Three.js screen overlay flips the camera Y axis, reversing winding.
   indices.push(face[0],face[2],face[1]);
  }
- const next=new THREE.BufferGeometry();
- next.setAttribute("position",new THREE.BufferAttribute(positions,3));
- next.setIndex(indices);
- next.computeBoundingSphere();
- const old=mesh.geometry;
- mesh.geometry=next;
- old.dispose();
+ const geometry=mesh.geometry;
+ const existing=geometry.getAttribute("position") as THREE.BufferAttribute | undefined;
+ if(existing?.count===base.length){
+  (existing.array as Float32Array).set(positions);
+  existing.needsUpdate=true;
+ }else{
+  geometry.setAttribute("position",new THREE.BufferAttribute(positions,3));
+ }
+ if(!geometry.index||geometry.index.count!==indices.length){geometry.setIndex(indices)}
+ geometry.computeBoundingSphere();
  mesh.visible=true;
  return true;
 }
