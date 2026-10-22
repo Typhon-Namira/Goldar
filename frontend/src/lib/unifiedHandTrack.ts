@@ -155,10 +155,21 @@ export class UnifiedHandTrack {
   const attribute=this.geometry.getAttribute("position") as THREE.BufferAttribute;
   const array=attribute.array as Float32Array;
   for(let i=0;i<this.initial.length;i++){
-   const v=this.initial[i].clone(),skin=this.nearest[i];
+   const skin=this.nearest[i];
+   const v=new THREE.Vector3();
+   // Blend local rigid transforms around neighboring joints. This preserves
+   // the volume of each finger segment better than joint translation alone.
    for(let k=0;k<skin.ids.length;k++){
     const j=skin.ids[k],w=skin.weights[k];
-    v.addScaledVector(this.current[j].clone().sub(this.source[j]),w);
+    const parent=j===0?9:j<=4?j-1:j<=8?(j===5?0:j-1):
+     j<=12?(j===9?0:j-1):j<=16?(j===13?0:j-1):(j===17?0:j-1);
+    const sourceAxis=this.source[j].clone().sub(this.source[parent]);
+    const targetAxis=this.current[j].clone().sub(this.current[parent]);
+    const rotation=new THREE.Quaternion();
+    if(sourceAxis.lengthSq()>1e-7&&targetAxis.lengthSq()>1e-7)
+     rotation.setFromUnitVectors(sourceAxis.normalize(),targetAxis.normalize());
+    const local=this.initial[i].clone().sub(this.source[j]).applyQuaternion(rotation);
+    v.addScaledVector(local.add(this.current[j]),w);
    }
    v.toArray(array,i*3);
   }
