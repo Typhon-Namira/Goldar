@@ -150,7 +150,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
        }
       }catch{/* Incompatible rig: use native WiLoR mesh safely. */}
      }
-     const next=new UnifiedHandTrack(acquisitionMesh,hand.landmarks,finger,hand.side,captured);
+     const next=new UnifiedHandTrack(acquisitionMesh,hand.landmarks,finger,hand.side,captured,exactLbs?lbs?.rig:undefined);
      if(!next.update(captureLandmarks,captured)){
       next.dispose();if(!track)setStatus("Waiting for consistent 3D calibration");return;
      }
@@ -161,7 +161,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      replaceTrack(next);
      lastMeshCapture=captured;
      latestMano=parsedMano;
-     setStatus("3D active · "+(exactLbs?"MANO LBS verified at capture":latestMano?"MANO parameters validated":"mesh fallback")+
+     setStatus("3D active · "+(exactLbs?"MANO-weighted live tracking":latestMano?"MANO parameters validated":"mesh fallback")+
       " · "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
     }catch(e){if(!disposed&&!track)setStatus("WiLoR: "+(e instanceof Error?e.message:"network error"))}
     finally{busy=false;controller=null}
@@ -234,7 +234,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    </div>
    <label className="tryon-setting">Finger <select disabled={running} value={finger} onChange={e=>setFinger(e.target.value as FingerName)}>{(["ring","index","middle","pinky"] as const).map(f=><option key={f} value={f}>{f}</option>)}</select></label>
    <label className="tryon-setting">Fit <input type="range" min=".85" max="1.25" step=".025" disabled={running} value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
-   <p className="tryon-disclaimer">Finger-locked MANO surface anchor and adaptive landmark stabilization. Exact MANO LBS is used for acquisition only when a matching rig is supplied; live deformation remains approximate and monocular camera calibration is not measured.</p>
+   <p className="tryon-disclaimer">Finger-locked MANO surface anchor and adaptive landmark stabilization. When a licensed matching MANO rig is supplied, live deformation uses its anatomical skinning weights with landmark-estimated joint transforms. This is not full pose-corrected MANO or calibrated SLAM.</p>
   </div>
  </section>;
 }
