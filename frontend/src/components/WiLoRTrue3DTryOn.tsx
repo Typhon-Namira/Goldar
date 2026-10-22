@@ -136,7 +136,11 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       }
      }
     }
-    if(now-lastGood>450){ringPivot.visible=false;if(track)track.occluder.visible=false}
+    if(now-lastGood>450){
+     ringPivot.visible=false;
+     if(track)track.occluder.visible=false;
+     if(now-lastGood>1200)lastLiveSide="Unknown";
+    }
     renderer.render(scene,camera);
    };
    cleanup.current=()=>{
