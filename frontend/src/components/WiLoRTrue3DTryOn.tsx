@@ -43,7 +43,7 @@ function snapshotGeometry(hand:Hand,finger:FingerName,diameter:number,fit:number
  const axis=tip.clone().sub(base);
  if(axis.length()<.008)return null;
  axis.normalize();
- const anchor=base.clone().lerp(tip,.52);
+ const anchor=base.clone().lerp(tip,.42);
  const across=cameraPoint(hand.landmarks[5],cam).sub(cameraPoint(hand.landmarks[17],cam));
  across.addScaledVector(axis,-across.dot(axis)).normalize();
  if(across.lengthSq()<.8)return null;
@@ -125,6 +125,9 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let captureFrame:ReturnType<typeof estimateFingerFrame>=null;
    let captureDepth=0;
    let capturePalm=0,poseTime=0;
+   let liveFrame:ReturnType<typeof estimateFingerFrame>=null;
+   let livePoints:P[]|null=null;
+   let liveSide:HandSide="Unknown";
    let lastVideo=-1,lastRequest=0,busy=false,raf=0,controller:AbortController|null=null;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
    const ctx=staging.getContext("2d");
@@ -161,6 +164,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      const frame=estimateFingerFrame(captureWorld,finger,side);
      const palm=Math.hypot(captureLandmarks[5].x-captureLandmarks[17].x,captureLandmarks[5].y-captureLandmarks[17].y);
      if(!snap||!frame||frame.confidence<.35||palm<.03)return;
+     if(performance.now()-capturedAt>5500||liveSide!==side||!liveFrame||!livePoints||liveFrame.quaternion.angleTo(frame.quaternion)>1){snap.surface.geometry.dispose();(snap.surface.material as THREE.Material).dispose();return;}
      if(surface){root.remove(surface);surface.geometry.dispose();(surface.material as THREE.Material).dispose()}
      surface=snap.surface;root.add(surface);
      ringPivot.position.copy(snap.anchor);
@@ -168,7 +172,23 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      ringPivot.scale.setScalar(snap.ringScale);
      cam=snap.cam;captureFrame=frame;capturePalm=palm;
      captureDepth=-snap.anchor.z;poseTime=capturedAt;
-     root.position.set(0,0,0);root.quaternion.identity();root.visible=true;
+     root.quaternion.copy(liveFrame.quaternion).multiply(frame.quaternion.clone().invert());
+     const live=livePoints;
+     const [jm,jp]=FINGERS[finger];
+     const centerX=live[jm].x*.58+live[jp].x*.42;
+     const centerY=live[jm].y*.58+live[jp].y*.42;
+     const w=canvas.clientWidth,h=canvas.clientHeight;
+     const cover=Math.max(w/video.videoWidth,h/video.videoHeight);
+     const px=centerX*video.videoWidth*cover+(w-video.videoWidth*cover)/2;
+     const py=centerY*video.videoHeight*cover+(h-video.videoHeight*cover)/2;
+     const fx=cam.fx*video.videoWidth/cam.width*cover;
+     const fy=cam.fy*video.videoHeight/cam.height*cover;
+     const cx=cam.cx*video.videoWidth/cam.width*cover+(w-video.videoWidth*cover)/2;
+     const cy=cam.cy*video.videoHeight/cam.height*cover+(h-video.videoHeight*cover)/2;
+     const depth=captureDepth;
+     const target=new THREE.Vector3((px-cx)*depth/fx,-(py-cy)*depth/fy,-depth);
+     root.position.copy(target.sub(ringPivot.position.clone().applyQuaternion(root.quaternion)));
+     root.visible=true;
      updateSize();
      setStatus("3D MANO active · "+hand.mesh.vertices.length+" vertices · WiLoR "+Math.round(result.inferenceMs)+" ms");
     }catch(e){if(!disposed)setStatus("WiLoR waiting: "+(e instanceof Error?e.message:"network error"))}
@@ -186,12 +206,13 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21&&world?.length===21){
       const frame=estimateFingerFrame(world,finger,side);
+      if(frame&&frame.confidence>.35){liveFrame=frame;livePoints=points.map(p=>({...p}));liveSide=side;}
       if(root.visible&&captureFrame&&cam&&frame&&frame.confidence>.35){
        // Rotate the entire reconstructed hand and the attached ring together.
        const delta=frame.quaternion.clone().multiply(captureFrame.quaternion.clone().invert());
        root.quaternion.slerp(delta,root.quaternion.angleTo(delta)>.7?.22:.38);
        const [m,p]=FINGERS[finger];
-       const center={x:(points[m].x+points[p].x)/2,y:(points[m].y+points[p].y)/2};
+       const center={x:points[m].x*.58+points[p].x*.42,y:points[m].y*.58+points[p].y*.42};
        const palm=Math.hypot(points[5].x-points[17].x,points[5].y-points[17].y);
        const depth=THREE.MathUtils.clamp(captureDepth*capturePalm/Math.max(palm,.01),captureDepth*.65,captureDepth*1.5);
        const w=canvas.clientWidth,h=canvas.clientHeight;
@@ -211,7 +232,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       void request(world,points,side,now);
      }
     }
-    if(now-poseTime>650)root.visible=false;
+    if(now-poseTime>1600)root.visible=false;
     renderer.render(scene,camera);
    };
    cleanup.current=()=>{
