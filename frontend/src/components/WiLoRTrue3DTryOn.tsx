@@ -135,11 +135,12 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     if(canvas.width!==Math.round(w*ratio)||canvas.height!==Math.round(h*ratio))renderer.setSize(w,h,false);
     if(cam)projection(camera,cam,video.videoWidth,video.videoHeight,w,h);
    };
-   const request=async(world:P[],side:HandSide,now:number)=>{
+   const request=async(world:P[],landmarks:P[],side:HandSide,now:number)=>{
     if(!ctx||busy||now-lastRequest<3500)return;
     busy=true;lastRequest=now;
     ctx.drawImage(video,0,0,480,360);
     const captureWorld=world.map(p=>({...p}));
+    const captureLandmarks=landmarks.map(p=>({...p}));
     const capturedAt=performance.now();
     try{
      const blob=await new Promise<Blob|null>(resolve=>staging.toBlob(resolve,"image/jpeg",.7));
@@ -207,7 +208,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
        root.position.lerp(shift,.38);
        poseTime=now;
       }
-      void request(world,side,now);
+      void request(world,points,side,now);
      }
     }
     if(now-poseTime>650)root.visible=false;
