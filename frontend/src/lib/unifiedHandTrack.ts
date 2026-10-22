@@ -104,7 +104,6 @@ export class UnifiedHandTrack {
  update(live:readonly Joint[],now:number):boolean{
   if(live.length!==21||live.some(p=>![p.x,p.y,p.z].every(finite)))return false;
   const srcWidth=Math.hypot(this.source[5].x-this.source[17].x,this.source[5].y-this.source[17].y);
-  const srcPx=Math.hypot(this.source[5].x-this.source[17].x,this.source[5].y-this.source[17].y);
   const imageWidth=Math.hypot(live[5].x-live[17].x,live[5].y-live[17].y);
   if(imageWidth<.025||!finite(imageWidth)||srcWidth<.01)return false;
   const referenceWidth=Math.hypot(
@@ -131,7 +130,8 @@ export class UnifiedHandTrack {
   const smoothed=fingerBasis(this.current,this.finger,this.side);
   if(!smoothed)return false;
   this.ringPosition.copy(smoothed.position);
-  this.ringRotation.slerp(smoothed.quaternion,alpha).normalize();
+  if(this.lastInput===0)this.ringRotation.copy(smoothed.quaternion);
+  else this.ringRotation.slerp(smoothed.quaternion,alpha).normalize();
   const attribute=this.geometry.getAttribute("position") as THREE.BufferAttribute;
   const array=attribute.array as Float32Array;
   for(let i=0;i<this.initial.length;i++){
