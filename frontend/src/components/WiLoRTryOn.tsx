@@ -5,9 +5,10 @@ import {PoseSmoother,type FingerName,type HandSide} from "@/lib/handPose";
 import {solveCameraRingPose} from "@/lib/cameraRingGeometry";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {createFingerOccluder,resizeFingerOccluder} from "@/lib/fingerOcclusion";
+import {createHandMeshOccluder,updateHandMeshOccluder,type RemoteHandMesh} from "@/lib/handMeshOcclusion";
 
 type Point={x:number;y:number;z:number};
-type ServerHand={side:"Left"|"Right";landmarks:Point[];worldLandmarks:Point[]};
+type ServerHand={side:"Left"|"Right";landmarks:Point[];worldLandmarks:Point[];mesh?:RemoteHandMesh};
 type ServerResponse={detected:boolean;hands:ServerHand[];inferenceMs:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
 const MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -53,6 +54,9 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const diameter=Math.max(calibration.innerDiameter,1e-5);
    const occluder=createFingerOccluder(diameter);occluder.visible=false;anchor.add(occluder);
    const smoother=new PoseSmoother();
+   const handMesh=createHandMeshOccluder();scene.add(handMesh);
+   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number}|null=null;
+   let latestPoints:Point[]|null=null;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
    const ctx=staging.getContext("2d");
    let raf=0,lastVideoTime=-1,lastTracked=0,lastServerSent=0,serverBusy=false,controller:AbortController|null=null;
@@ -76,7 +80,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
     ctx.drawImage(video,0,0,staging.width,staging.height);
     const blob=await new Promise<Blob|null>(resolve=>staging.toBlob(resolve,"image/jpeg",.65));
     if(!blob||disposed){serverBusy=false;return}
-    const form=new FormData();form.append("frame",blob,"frame.jpg");
+    const form=new FormData();form.append("frame",blob,"frame.jpg");form.append("include_mesh","true");
     controller=new AbortController();
     const timeout=setTimeout(()=>controller?.abort(),12000);
     try{
@@ -87,6 +91,9 @@ export default function WiLoRTryOn({product}:{product:Product}){
      setServerLatency(result.inferenceMs);
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21)return;
+     if(hand.mesh?.available&&hand.mesh.vertices?.length&&hand.mesh.faces?.length){
+      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt:performance.now()};
+     }
      // The server result corresponds to the captured frame, not the current frame.
      const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side,hand.worldLandmarks);
      if(!localPose||!remotePose)return;
@@ -114,6 +121,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21){
 
+      latestPoints=points;
       const world=detection.worldLandmarks?.[0] as Point[]|undefined;
       const solved=solve(points,side,world);
       if(solved){
@@ -136,7 +144,16 @@ export default function WiLoRTryOn({product}:{product:Product}){
      }
     }
     // Allow a brief detector dropout; never tie visibility to slow server calls.
-    if(now-lastTracked>850){anchor.visible=false;smoother.reset()}
+    if(now-lastTracked>850){anchor.visible=false;smoother.reset();latestPoints=null}
+    handMesh.visible=false;
+    if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&now-meshSnapshot.capturedAt<6000){
+     const fingerJoint=({index:5,middle:9,ring:13,pinky:17} as const)[finger];
+     const valid=updateHandMeshOccluder({
+      mesh:handMesh,remote:meshSnapshot.mesh,remoteLandmarks:meshSnapshot.landmarks,
+      liveLandmarks:latestPoints,toScreen,width:w,height:h,fingerJoint,
+     });
+     if(valid)occluder.visible=false;
+    }
     renderer.render(scene,camera);
    };
    cleanupRef.current=()=>{
