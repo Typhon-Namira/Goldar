@@ -65,7 +65,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const solve=(points:Point[],side:HandSide)=>{
     const w=canvas.clientWidth,h=canvas.clientHeight;
     return solveCameraRingPose({landmarks:points,finger,toScreen,width:w,height:h,holeDiameter:diameter,
-     anchorFraction:product.ring_calibration?.anchorFraction??.22,
+     anchorFraction:product.ring_calibration?.anchorFraction??.38,
      fitMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
      widthCalibration,reportedSide:side,cameraFacing:facing,
      previousQuaternion:smoother.ready?smoother.rotation:undefined});
@@ -87,12 +87,12 @@ export default function WiLoRTryOn({product}:{product:Product}){
      setServerLatency(result.inferenceMs);
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21)return;
-     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side);
+     // The server result corresponds to the captured frame, not the current frame.\n     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side);
      if(!localPose||!remotePose)return;
      const dx=remotePose.position.x-localPose.position.x,dy=remotePose.position.y-localPose.position.y;
      const ratio=remotePose.scale/localPose.scale;
      // Never allow a stale or divergent server estimate to throw the ring.
-     if(Math.hypot(dx,dy)<35&&ratio>.8&&ratio<1.2){
+     if(Math.hypot(dx,dy)<18&&ratio>.9&&ratio<1.1){
       correction={dx,dy,scale:ratio,time:performance.now()};
      }
     }catch(e){if(!disposed)console.warn("WiLoR correction unavailable; continuing local tracking",e)}
@@ -119,7 +119,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
        // Server result only makes small bounded adjustments; decay it rapidly.
        let adjustedScale=scale;
        if(correction){
-        const weight=Math.max(0,1-(now-correction.time)/2000)*.25;
+        const weight=Math.max(0,1-(now-correction.time)/1200)*.12;
         position.x+=correction.dx*weight;position.y+=correction.dy*weight;
         adjustedScale*=1+(correction.scale-1)*weight;
        }
@@ -134,7 +134,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      }
     }
     // Allow a brief detector dropout; never tie visibility to slow server calls.
-    if(now-lastTracked>1100){anchor.visible=false;smoother.reset()}
+    if(now-lastTracked>700){anchor.visible=false;smoother.reset()}
     renderer.render(scene,camera);
    };
    cleanupRef.current=()=>{
