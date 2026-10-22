@@ -105,14 +105,34 @@ export class UnifiedHandTrack {
   if(live.length!==21||live.some(p=>![p.x,p.y,p.z].every(finite)))return false;
   const srcWidth=Math.hypot(this.source[5].x-this.source[17].x,this.source[5].y-this.source[17].y);
   const imageWidth=Math.hypot(live[5].x-live[17].x,live[5].y-live[17].y);
-  if(imageWidth<.025||!finite(imageWidth)||srcWidth<.01)return false;
+  if(imageWidth<.025||!finite(imageWidth)||srcWidth<.005)return false;
   const referenceWidth=Math.hypot(
    (this.source[5].x/-this.source[5].z*this.camera.fx-this.source[17].x/-this.source[17].z*this.camera.fx)/this.camera.width,
    (-this.source[5].y/-this.source[5].z*this.camera.fy+this.source[17].y/-this.source[17].z*this.camera.fy)/this.camera.height);
   if(referenceWidth<.015||!finite(referenceWidth))return false;
-  const depthRatio=clamp(referenceWidth/imageWidth,.65,1.5);
+  // Estimate the global depth by minimizing reprojection errors of several
+  // bone lengths rather than relying on a single palm-width ratio.
+  // This is a relative depth estimate; absolute metric scale remains
+  // unobservable without a calibrated external reference.
+  const bones:[number,number][]=[[0,5],[0,9],[0,13],[0,17],
+   [5,6],[6,7],[7,8],[9,10],[10,11],[11,12],
+   [13,14],[14,15],[15,16],[17,18],[18,19],[19,20]];
+  const rootDepth=-this.source[0].z;
+  const ratios:number[]=[];
+  for(const [a,b] of bones){
+   const baseline=this.source[a].distanceTo(this.source[b]);
+   const dx=(live[a].x-live[b].x)*this.camera.width/this.camera.fx;
+   const dy=(live[a].y-live[b].y)*this.camera.height/this.camera.fy;
+   const imageLength=Math.hypot(dx,dy);
+   if(imageLength>.003&&baseline>.006)ratios.push(baseline/imageLength);
+  }
+  ratios.sort((a,b)=>a-b);
+  const median=ratios.length?ratios[Math.floor(ratios.length/2)]:rootDepth*referenceWidth/imageWidth;
+  const globalDepth=clamp(median,rootDepth*.65,rootDepth*1.5);
   const targets=live.map((p,i)=>{
-   const depth=clamp(-this.source[i].z*depthRatio,.08,4);
+   // Preserve relative MANO depth offsets; translate the hand as a whole
+   // using the multi-bone estimate. Avoid interpreting MediaPipe z as meters.
+   const depth=clamp(globalDepth+(-this.source[i].z-rootDepth),.08,4);
    return lift({x:p.x,y:p.y,z:depth},this.camera);
   });
   const basis=fingerBasis(targets,this.finger,this.side);
