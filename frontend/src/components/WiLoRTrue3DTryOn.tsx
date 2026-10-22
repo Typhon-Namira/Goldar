@@ -125,6 +125,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let captureFrame:ReturnType<typeof estimateFingerFrame>=null;
    let captureDepth=0;
    let capturePalm=0,poseTime=0;
+   let lastAcceptedCapture=0;
    let liveFrame:ReturnType<typeof estimateFingerFrame>=null;
    let livePoints:P[]|null=null;
    let liveSide:HandSide="Unknown";
@@ -164,14 +165,15 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      const frame=estimateFingerFrame(captureWorld,finger,side);
      const palm=Math.hypot(captureLandmarks[5].x-captureLandmarks[17].x,captureLandmarks[5].y-captureLandmarks[17].y);
      if(!snap||!frame||frame.confidence<.35||palm<.03)return;
-     if(performance.now()-capturedAt>5500||liveSide!==side||!liveFrame||!livePoints||liveFrame.quaternion.angleTo(frame.quaternion)>1){snap.surface.geometry.dispose();(snap.surface.material as THREE.Material).dispose();return;}
+     if(capturedAt<=lastAcceptedCapture||performance.now()-capturedAt>5500||liveSide!==side||!liveFrame||!livePoints||liveFrame.quaternion.angleTo(frame.quaternion)>1){snap.surface.geometry.dispose();(snap.surface.material as THREE.Material).dispose();return;}
+     lastAcceptedCapture=capturedAt;
      if(surface){root.remove(surface);surface.geometry.dispose();(surface.material as THREE.Material).dispose()}
      surface=snap.surface;root.add(surface);
      ringPivot.position.copy(snap.anchor);
      ringPivot.quaternion.copy(snap.quat);
      ringPivot.scale.setScalar(snap.ringScale);
      cam=snap.cam;captureFrame=frame;capturePalm=palm;
-     captureDepth=-snap.anchor.z;poseTime=capturedAt;
+     captureDepth=-snap.anchor.z;poseTime=performance.now();
      root.quaternion.copy(liveFrame.quaternion).multiply(frame.quaternion.clone().invert());
      const live=livePoints;
      const [jm,jp]=FINGERS[finger];
