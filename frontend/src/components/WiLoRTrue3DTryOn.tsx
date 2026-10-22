@@ -125,8 +125,14 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       next.dispose();if(!track)setStatus("Waiting for stable finger pose");return;
      }
      if(track){
-      next.ringPosition.copy(track.ringPosition);
-      next.ringRotation.copy(track.ringRotation);
+      // A delayed server response may update hand shape, but must never
+      // re-anchor a ring that is already tracking live camera landmarks.
+      // Keep the active track until it is lost; the next acquisition can
+      // safely use the latest WiLoR snapshot.
+      next.dispose();
+      lastMeshCapture=captured;
+      latestMano=parsedMano;
+      return;
      }
      replaceTrack(next);
      lastMeshCapture=captured;
@@ -155,9 +161,8 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
         ringPivot.position.copy(track.ringPosition);
         ringPivot.quaternion.copy(track.ringRotation);
         // Follow the same deforming surface used for ring position.
-        const desired=track.ringRadius*2*1.06*fit;
-        fittedDiameter=THREE.MathUtils.lerp(fittedDiameter,
-         THREE.MathUtils.clamp(desired,fittedDiameter*.985,fittedDiameter*1.015),.2);
+        // Lock the calibrated physical ring diameter for the lifetime of
+        // this track; changing camera distance must not pump its scale.
         ringPivot.scale.setScalar(fittedDiameter/Math.max(.00001,calibration.innerDiameter));
         ringPivot.visible=true;track.occluder.visible=true;
         lastGood=now;
@@ -169,7 +174,13 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     if(now-lastGood>450){
      ringPivot.visible=false;
      if(track)track.occluder.visible=false;
-     if(now-lastGood>1200)lastLiveSide="Unknown";
+     if(now-lastGood>1200){
+      lastLiveSide="Unknown";
+      // After tracking loss, reacquire against a fresh mesh instead of
+      // using a stale finger frame from an earlier camera viewpoint.
+      if(track){scene.remove(track.occluder);track.dispose();track=null}
+      lastRequest=0;
+     }
     }
     renderer.render(scene,camera);
    };
