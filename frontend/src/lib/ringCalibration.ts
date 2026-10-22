@@ -94,7 +94,9 @@ export function attachCalibratedRing(model:THREE.Object3D, calibration:RingCalib
  stone.y=0;
  if(stone.lengthSq()>1e-8){
   const spin=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),-Math.atan2(stone.x,stone.z));
-  // Flip the ring about its hole axis: the previous canonical +Z face\n  // placed the gem on the palm-facing side for the current camera basis.\n  const dorsalFlip=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI);\n  group.quaternion.copy(dorsalFlip.multiply(spin).multiply(align));
+  // +Z is the dorsal (gem-facing) direction of the finger frame.
+  // A 180-degree flip would put the gemstone on the palm side.
+  group.quaternion.copy(spin.multiply(align));
  }else group.quaternion.copy(align);
  return group;
 }
