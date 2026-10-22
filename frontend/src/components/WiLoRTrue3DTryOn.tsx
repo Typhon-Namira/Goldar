@@ -10,7 +10,8 @@ import {UnifiedHandTrack,cameraProjection,type Joint} from "@/lib/unifiedHandTra
 import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
 import {parseManoSnapshot,type ManoSnapshot} from "@/lib/manoSnapshot";
 
-type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown};
+type LbsPayload={schemaVersion:number;rig:ManoRig;pose:ManoPose;requiresModelToCameraTransform:boolean};
+type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown;manoLbs?:LbsPayload};
 type RemoteResult={hands?:RemoteHand[];inferenceMs?:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
 const MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -118,7 +119,38 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      // MANO supplies the anatomical surface at acquisition. The live
      // camera tracker subsequently moves its locked finger-local frame.
      const parsedMano=parseManoSnapshot(hand.mano);
-     const next=new UnifiedHandTrack(hand.mesh,hand.landmarks,finger,hand.side,captured);
+     // Prefer exact 16-joint MANO skinning when a licensed, matching rig is
+     // explicitly supplied. Otherwise retain the native WiLoR mesh; never
+     // fabricate MANO weights from 21 MediaPipe landmarks.
+     let acquisitionMesh=hand.mesh;
+     let exactLbs=false;
+     const lbs=hand.manoLbs;
+     if(lbs?.schemaVersion===1&&lbs.requiresModelToCameraTransform===true&&
+        parsedMano?.cameraTranslation?.length===3){
+      try{
+       const skinned=skinMano(lbs.rig,lbs.pose).vertices;
+       const t=parsedMano.cameraTranslation;
+       const handedness=hand.side==="Right"?1:-1;
+       const cameraVertices=skinned.map(v=>[
+        v.x*handedness+t[0],v.y+t[1],v.z+t[2]
+       ]);
+       if(cameraVertices.every(v=>v.every(Number.isFinite)&&v[2]>0)&&
+          cameraVertices.length===hand.mesh.vertices.length){
+        // The reconstructed surface must agree with WiLoR's native mesh.
+        // Otherwise a mismatched MANO version/side would displace the ring.
+        const maxError=cameraVertices.reduce((max,v,i)=>{
+         const original=hand.mesh!.vertices[i];
+         return Math.max(max,Math.hypot(
+          v[0]-original[0],v[1]-original[1],v[2]-original[2]));
+        },0);
+        if(maxError<.003){
+         acquisitionMesh={...hand.mesh,vertices:cameraVertices};
+         exactLbs=true;
+        }
+       }
+      }catch{/* Incompatible rig: use native WiLoR mesh safely. */}
+     }
+     const next=new UnifiedHandTrack(acquisitionMesh,hand.landmarks,finger,hand.side,captured,exactLbs?lbs?.rig:undefined);
      if(!next.update(captureLandmarks,captured)){
       next.dispose();if(!track)setStatus("Waiting for consistent 3D calibration");return;
      }
@@ -129,7 +161,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      replaceTrack(next);
      lastMeshCapture=captured;
      latestMano=parsedMano;
-     setStatus("3D active · "+(latestMano?"MANO parameters validated":"mesh fallback")+
+     setStatus("3D active · "+(exactLbs?"MANO-weighted live tracking":latestMano?"MANO parameters validated":"mesh fallback")+
       " · "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
     }catch(e){if(!disposed&&!track)setStatus("WiLoR: "+(e instanceof Error?e.message:"network error"))}
     finally{busy=false;controller=null}
@@ -202,7 +234,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    </div>
    <label className="tryon-setting">Finger <select disabled={running} value={finger} onChange={e=>setFinger(e.target.value as FingerName)}>{(["ring","index","middle","pinky"] as const).map(f=><option key={f} value={f}>{f}</option>)}</select></label>
    <label className="tryon-setting">Fit <input type="range" min=".85" max="1.25" step=".025" disabled={running} value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
-   <p className="tryon-disclaimer">Finger-locked MANO surface anchor, adaptive landmark stabilization and perspective depth tracking. Mesh deformation is joint-weighted approximation, not exact MANO LBS; monocular camera calibration remains approximate.</p>
+   <p className="tryon-disclaimer">Finger-locked MANO surface anchor and adaptive landmark stabilization. When a licensed matching MANO rig is supplied, live deformation uses its anatomical skinning weights with landmark-estimated joint transforms. This is not full pose-corrected MANO or calibrated SLAM.</p>
   </div>
  </section>;
 }
