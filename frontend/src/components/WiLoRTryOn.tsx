@@ -62,13 +62,13 @@ export default function WiLoRTryOn({product}:{product:Product}){
     const w=canvas.clientWidth,h=canvas.clientHeight,vw=video.videoWidth||w,vh=video.videoHeight||h;
     const s=Math.max(w/vw,h/vh);return {x:p.x*vw*s+(w-vw*s)/2,y:p.y*vh*s+(h-vh*s)/2};
    };
-   const solve=(points:Point[],side:HandSide)=>{
+   const solve=(points:Point[],side:HandSide,world?:Point[])=>{
     const w=canvas.clientWidth,h=canvas.clientHeight;
     return solveCameraRingPose({landmarks:points,finger,toScreen,width:w,height:h,holeDiameter:diameter,
      anchorFraction:product.ring_calibration?.anchorFraction??.52,
      fitMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
      widthCalibration,reportedSide:side,cameraFacing:facing,
-     previousQuaternion:smoother.ready?smoother.rotation:undefined});
+     worldLandmarks:world,previousQuaternion:smoother.ready?smoother.rotation:undefined});
    };
    const sendCorrection=async(points:Point[],side:HandSide,now:number)=>{
     if(!ENDPOINT||!ctx||serverBusy||now-lastServerSent<3500)return;
@@ -88,7 +88,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21)return;
      // The server result corresponds to the captured frame, not the current frame.
-     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side);
+     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side,hand.worldLandmarks);
      if(!localPose||!remotePose)return;
      const dx=remotePose.position.x-localPose.position.x,dy=remotePose.position.y-localPose.position.y;
      const ratio=remotePose.scale/localPose.scale;
@@ -114,7 +114,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21){
 
-      const solved=solve(points,side);
+      const world=detection.worldLandmarks?.[0] as Point[]|undefined;\n      const solved=solve(points,side,world);
       if(solved){
        const position=solved.position.clone(),scale=solved.scale;
        // Server result only makes small bounded adjustments; decay it rapidly.
