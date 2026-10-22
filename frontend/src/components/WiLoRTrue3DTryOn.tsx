@@ -52,7 +52,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
    let lastMeshCapture=0;
    let busy=false,raf=0,controller:AbortController|null=null;
-   let currentLive:Joint[]|null=null,liveTimestamp=0;
+   
    const stage=document.createElement("canvas");stage.width=480;stage.height=360;
    const ctx=stage.getContext("2d");
    const updateSize=()=>{
@@ -71,9 +71,8 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     ringPivot.scale.setScalar(physicalDiameter/Math.max(.00001,calibration.innerDiameter));
     updateSize();
    };
-   const fetchMesh=async(live:Joint[],side:HandSide,now:number)=>{
-    // WiLoR is an initialization/reacquisition source, not a second live
-    // tracker. Never send snapshots that would only be discarded.
+   const fetchMesh=async(side:HandSide,now:number)=>{
+    // WiLoR alone supplies tracking snapshots; never mix 2D pose providers.
     if(busy||!ctx||now-lastRequest<280)return;
     busy=true;lastRequest=now;
     // Capture the complete camera frame with its native aspect ratio.
@@ -87,7 +86,6 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     }
     ctx.drawImage(video,0,0,stage.width,stage.height);
     const captured=performance.now();
-    const captureLandmarks=live.map(p=>({...p}));
     try{
      const blob=await new Promise<Blob|null>(resolve=>stage.toBlob(resolve,"image/jpeg",.75));
      if(!blob||disposed)return;
@@ -107,8 +105,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(hand)lastLiveSide=hand.side;
      if(!hand?.mesh){if(!track)setStatus("Waiting for WiLoR MANO mesh");return}
      if(performance.now()-captured>9000)return;
-     // Keep the existing track if it is healthy: asynchronous mesh replacements
-     // must not reset ring orientation or shift the ring every 3.5 seconds.
+     // Preserve the current track between asynchronous WiLoR updates.
      if(captured<=lastMeshCapture)return;
      if(track){
       if(track.update(hand.landmarks,performance.now())){
@@ -173,7 +170,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     raf=requestAnimationFrame(tick);updateSize();
     if(video.readyState>=2&&video.videoWidth>0){
      // WiLoR is the sole tracking authority; do not mix MediaPipe poses.
-     void fetchMesh([],lastLiveSide,now);
+     void fetchMesh(lastLiveSide,now);
      if(track&&track.lastSeen>0&&now-track.lastSeen<700){
       ringPivot.position.copy(track.ringPosition);
       ringPivot.quaternion.copy(track.ringRotation);
