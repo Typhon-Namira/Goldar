@@ -52,6 +52,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let latestMano:ManoSnapshot|null=null;
    let lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
    let lastMeshCapture=0;
+   let rejectedUpdates=0;
    let busy=false,raf=0,controller:AbortController|null=null;
    
    const stage=document.createElement("canvas");stage.width=480;stage.height=360;
@@ -77,8 +78,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     if(busy||!ctx||now-lastRequest<280)return;
     busy=true;lastRequest=now;
     // Capture the complete camera frame with its native aspect ratio.
-    // MediaPipe normalized landmarks and WiLoR pixels must refer to the
-    // same uncropped image, including portrait mobile video.
+    // Preserve the uncropped aspect ratio for WiLoR pixel coordinates.
     const captureWidth=480;
     const captureHeight=Math.max(1,Math.round(captureWidth*video.videoHeight/video.videoWidth));
     if(!Number.isFinite(captureHeight)||!video.videoWidth){busy=false;return}
@@ -110,13 +110,21 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(captured<=lastMeshCapture)return;
      if(track){
       if(track.update(hand.landmarks,performance.now())){
+       rejectedUpdates=0;
        ringPivot.position.copy(track.ringPosition);
        ringPivot.quaternion.copy(track.ringRotation);
        ringPivot.visible=true;track.occluder.visible=true;
        lastGood=performance.now();
+      }else if(++rejectedUpdates>=3){
+       // Reacquire when the hand has moved beyond the original mesh pose.
+       scene.remove(track.occluder);track.dispose();track=null;
+       rejectedUpdates=0;
+       ringPivot.visible=false;
+      }else{
+       lastMeshCapture=captured;
+       return;
       }
-      lastMeshCapture=captured;
-      return;
+      if(track){lastMeshCapture=captured;return;}
      }
      // MANO supplies the anatomical surface at acquisition. The live
      // camera tracker subsequently moves its locked finger-local frame.
@@ -159,6 +167,11 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
 
      if(track){next.dispose();return}
      replaceTrack(next);
+     ringPivot.position.copy(next.ringPosition);
+     ringPivot.quaternion.copy(next.ringRotation);
+     ringPivot.visible=true;
+     next.occluder.visible=true;
+     lastGood=performance.now();
      lastMeshCapture=captured;
      latestMano=parsedMano;
      setStatus("3D active · "+(exactLbs?"MANO-weighted live tracking":latestMano?"MANO parameters validated":"mesh fallback")+
