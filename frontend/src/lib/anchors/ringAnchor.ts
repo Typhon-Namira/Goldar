@@ -34,7 +34,9 @@ const NEIGHBORS: Record<FingerName,readonly [number,number]> = {
 const good=(p:HandPoint)=>p&&[p.x,p.y,p.z].every(Number.isFinite);
 
 export function estimateAnatomicalRingAnchor(input:{
-  landmarks: readonly HandPoint[];\n  /** Relative 3D reconstruction; orientation only, not metric camera position. */\n  worldLandmarks?: readonly HandPoint[];
+  landmarks: readonly HandPoint[];
+  /** Relative 3D reconstruction; orientation only, not metric camera position. */
+  worldLandmarks?: readonly HandPoint[];
   finger: FingerName;
   toScreen:(p:HandPoint)=>{x:number;y:number};
   width:number;height:number;
@@ -144,7 +146,8 @@ export function estimateAnatomicalRingAnchor(input:{
   const neighbor=NEIGHBORS[finger];
   const spacing=cameraPoint(neighbor[0]).distanceTo(cameraPoint(neighbor[1]));
   const widthProxy=Math.min(handBreadth*0.29,Math.max(handBreadth*0.16,spacing*0.68));
-  // Projected landmark span grows with camera approach; preserve that natural scale.\n  const fingerWidthPx=widthProxy*widthCalibration;
+  // Projected landmark span grows with camera approach; preserve that natural scale.
+  const fingerWidthPx=widthProxy*widthCalibration;
   const scale=fingerWidthPx/holeDiameter*fitMultiplier;
   if(!Number.isFinite(scale)||scale<=0||![position.x,position.y,position.z,quaternion.x,quaternion.y,quaternion.z,quaternion.w].every(Number.isFinite))return null;
   const quality=THREE.MathUtils.clamp(lateralSize/handBreadth,0,1)*
