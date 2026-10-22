@@ -124,7 +124,11 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(currentLive&&!next.update(currentLive,performance.now())){
       next.dispose();if(!track)setStatus("Waiting for stable finger pose");return;
      }
-     if(track){\n      next.ringPosition.copy(track.ringPosition);\n      next.ringRotation.copy(track.ringRotation);\n     }\n     replaceTrack(next);
+     if(track){
+      next.ringPosition.copy(track.ringPosition);
+      next.ringRotation.copy(track.ringRotation);
+     }
+     replaceTrack(next);
      lastMeshCapture=captured;
      latestMano=parsedMano;
      setStatus("3D active · "+(latestMano?"MANO parameters validated":"mesh fallback")+
