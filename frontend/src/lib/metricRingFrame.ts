@@ -17,7 +17,7 @@ export function solveMetricRingFrame(args:{
  mesh:RemoteHandMesh;toScreen:(p:MeshPoint)=>{x:number;y:number};
  width:number;height:number;diameter:number;fitMultiplier:number;
  anchorFraction:number;previous?:THREE.Quaternion;
-}):{position:THREE.Vector3;quaternion:THREE.Quaternion;scale:number;fingerWidthPx:number;anchorDepth:number}|null{
+}):{position:THREE.Vector3;quaternion:THREE.Quaternion;scale:number;fingerWidthPx:number;anchorDepth:number;pixelsPerMeter:number}|null{
  const {finger,landmarks,mesh,toScreen,width,height,diameter,fitMultiplier}=args;
  const cam=mesh.camera;
  if(landmarks.length!==21||!landmarks.every(finite)||!mesh.available||!cam||
@@ -63,7 +63,8 @@ export function solveMetricRingFrame(args:{
  const cameraWidth=cam.fx*(diameter*fitMultiplier)/(-origin.z);
  const screenWidth=toScreen({x:1/cam.width,y:0,z:0}).x-toScreen({x:0,y:0,z:0}).x;
  const fingerWidthPx=Math.abs(cameraWidth*screenWidth);
+ const pixelsPerMeter=Math.abs(cam.fx*screenWidth/(-origin.z));
  if(!Number.isFinite(fingerWidthPx)||fingerWidthPx<4||fingerWidthPx>palmWidth*.75)return null;
  return {position:new THREE.Vector3(screen.x-width/2,height/2-screen.y,0),
- quaternion,scale:fingerWidthPx/diameter,fingerWidthPx,anchorDepth:-origin.z};
+ quaternion,scale:fingerWidthPx/diameter,fingerWidthPx,anchorDepth:-origin.z,pixelsPerMeter};
 }
