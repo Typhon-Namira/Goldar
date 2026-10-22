@@ -114,7 +114,8 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21){
 
-      const world=detection.worldLandmarks?.[0] as Point[]|undefined;\n      const solved=solve(points,side,world);
+      const world=detection.worldLandmarks?.[0] as Point[]|undefined;
+      const solved=solve(points,side,world);
       if(solved){
        const position=solved.position.clone(),scale=solved.scale;
        // Server result only makes small bounded adjustments; decay it rapidly.
