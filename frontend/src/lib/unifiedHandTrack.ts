@@ -1,9 +1,12 @@
 import * as THREE from "three";
 import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
 import type {FingerName,HandSide} from "@/lib/handPose";
+import type {ManoRig} from "@/lib/manoLbs";
 
 export type Joint={x:number;y:number;z:number};
 export type CameraIntrinsics=RemoteHandMesh["camera"];
+// MANO joint order mapped to WiLoR/OpenPose 21-landmark order.
+const MANO_LANDMARKS=[0,5,6,7,9,10,11,17,18,19,13,14,15,1,2,3] as const;
 const BONES:Record<FingerName,[number,number]>={index:[5,6],middle:[9,10],ring:[13,14],pinky:[17,18]};
 const finite=(n:number)=>Number.isFinite(n);
 const clamp=THREE.MathUtils.clamp;
@@ -63,12 +66,16 @@ export class UnifiedHandTrack {
  lastSeen=0;
  private lastInput=0;
  private readonly nearest:{ids:number[];weights:number[]}[]=[];
+ private readonly manoWeights:number[][]|null;
  private readonly initial:THREE.Vector3[];
- constructor(mesh:RemoteHandMesh,landmarks:readonly Joint[],finger:FingerName,side:HandSide,createdAt:number){
+ constructor(mesh:RemoteHandMesh,landmarks:readonly Joint[],finger:FingerName,side:HandSide,createdAt:number,manoRig?:ManoRig){
   if(!mesh.available||!mesh.camera||mesh.vertices.length<100||mesh.faces.length<100||landmarks.length!==21)throw Error("Missing MANO geometry");
   const c=mesh.camera;
   if(![c.fx,c.fy,c.width,c.height].every(v=>finite(v)&&v>0))throw Error("Invalid camera calibration");
   this.camera=c;this.finger=finger;this.side=side;this.createdAt=createdAt;
+  this.manoWeights=manoRig?.weights?.length===mesh.vertices.length&&
+   manoRig.weights.every(w=>w.length===16&&w.every(n=>Number.isFinite(n)&&n>=0)&&Math.abs(w.reduce((a,b)=>a+b,0)-1)<.02)
+   ?manoRig.weights:null;
   this.sourceNormalized=landmarks.map(p=>({...p}));
   this.source=landmarks.map(p=>lift(p,c));
   if(this.source.some(p=>![p.x,p.y,p.z].every(finite)))throw Error("Invalid source joints");
@@ -240,22 +247,44 @@ export class UnifiedHandTrack {
   // are refined below using the live, articulated skin cross-section.
   const attribute=this.geometry.getAttribute("position") as THREE.BufferAttribute;
   const array=attribute.array as Float32Array;
+  // When a matching MANO rig is available, use its anatomical 16-joint
+  // skinning weights for EVERY video frame. The live joint transforms are
+  // estimated from MediaPipe; they are not a new WiLoR MANO pose prediction.
+  // With no distributable rig, preserve the existing four-nearest fallback.
+  const jointTransforms=this.manoWeights?MANO_LANDMARKS.map((landmark,i)=>{
+   const parent=i===0?9:([0,0,1,2,0,4,5,0,7,8,0,10,11,0,13,14] as const)[i];
+   const parentLandmark=MANO_LANDMARKS[parent];
+   const sourceAxis=this.source[landmark].clone().sub(this.source[parentLandmark]);
+   const targetAxis=this.current[landmark].clone().sub(this.current[parentLandmark]);
+   const q=new THREE.Quaternion();
+   if(i>0&&sourceAxis.lengthSq()>1e-7&&targetAxis.lengthSq()>1e-7)
+    q.setFromUnitVectors(sourceAxis.normalize(),targetAxis.normalize());
+   return {joint:landmark,rotation:q};
+  }):null;
   for(let i=0;i<this.initial.length;i++){
-   const skin=this.nearest[i];
    const v=new THREE.Vector3();
-   // Blend local rigid transforms around neighboring joints. This preserves
-   // the volume of each finger segment better than joint translation alone.
-   for(let k=0;k<skin.ids.length;k++){
-    const j=skin.ids[k],w=skin.weights[k];
-    const parent=j===0?9:j<=4?j-1:j<=8?(j===5?0:j-1):
-     j<=12?(j===9?0:j-1):j<=16?(j===13?0:j-1):(j===17?0:j-1);
-    const sourceAxis=this.source[j].clone().sub(this.source[parent]);
-    const targetAxis=this.current[j].clone().sub(this.current[parent]);
-    const rotation=new THREE.Quaternion();
-    if(sourceAxis.lengthSq()>1e-7&&targetAxis.lengthSq()>1e-7)
-     rotation.setFromUnitVectors(sourceAxis.normalize(),targetAxis.normalize());
-    const local=this.initial[i].clone().sub(this.source[j]).applyQuaternion(rotation);
-    v.addScaledVector(local.add(this.current[j]),w);
+   if(jointTransforms&&this.manoWeights){
+    for(let j=0;j<16;j++){
+     const w=this.manoWeights[i][j];
+     if(w<=0)continue;
+     const {joint,rotation}=jointTransforms[j];
+     const local=this.initial[i].clone().sub(this.source[joint]).applyQuaternion(rotation);
+     v.addScaledVector(local.add(this.current[joint]),w);
+    }
+   }else{
+    const skin=this.nearest[i];
+    for(let k=0;k<skin.ids.length;k++){
+     const j=skin.ids[k],w=skin.weights[k];
+     const parent=j===0?9:j<=4?j-1:j<=8?(j===5?0:j-1):
+      j<=12?(j===9?0:j-1):j<=16?(j===13?0:j-1):(j===17?0:j-1);
+     const sourceAxis=this.source[j].clone().sub(this.source[parent]);
+     const targetAxis=this.current[j].clone().sub(this.current[parent]);
+     const rotation=new THREE.Quaternion();
+     if(sourceAxis.lengthSq()>1e-7&&targetAxis.lengthSq()>1e-7)
+      rotation.setFromUnitVectors(sourceAxis.normalize(),targetAxis.normalize());
+     const local=this.initial[i].clone().sub(this.source[j]).applyQuaternion(rotation);
+     v.addScaledVector(local.add(this.current[j]),w);
+    }
    }
    v.toArray(array,i*3);
   }
