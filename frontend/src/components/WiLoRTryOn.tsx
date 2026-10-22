@@ -62,6 +62,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    let latestMetric:{anchorDepth:number;pixelsPerMeter:number}|null=null;
    let lastMeshUpdate=0;
    let lastMeshValid=false;
+   let latestLiveTime=0;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
    const ctx=staging.getContext("2d");
    let raf=0,lastVideoTime=-1,lastTracked=0,lastServerSent=0,serverBusy=false,controller:AbortController|null=null;
@@ -132,6 +133,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      if(points?.length===21){
 
       latestPoints=points;
+      latestLiveTime=now;
       const world=detection.worldLandmarks?.[0] as Point[]|undefined;
       const solved=solve(points,side,world);
       if(solved){
@@ -168,9 +170,9 @@ export default function WiLoRTryOn({product}:{product:Product}){
     // Allow a brief detector dropout; never tie visibility to slow server calls.
     if(now-lastTracked>850){anchor.visible=false;smoother.reset();latestPoints=null;latestMetric=null;lastMeshValid=false}
     handMesh.visible=false;
-    if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&now-meshSnapshot.capturedAt<4500){
+    if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&latestMetric&&now-latestLiveTime<150&&now-meshSnapshot.capturedAt<4500){
      const fingerJoint=({index:5,middle:9,ring:13,pinky:17} as const)[finger];
-     const valid=now-lastMeshUpdate<65&&lastMeshValid?true:updateHandMeshOccluder({
+     const valid=updateHandMeshOccluder({
       mesh:handMesh,remote:meshSnapshot.mesh,remoteLandmarks:meshSnapshot.landmarks,
       liveLandmarks:latestPoints,toScreen,width:w,height:h,fingerJoint,
       ringWidthPx:Math.max(8,smoother.scale*diameter),
