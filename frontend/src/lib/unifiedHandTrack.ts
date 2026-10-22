@@ -30,10 +30,11 @@ export function fingerBasis(points:readonly THREE.Vector3[],finger:FingerName,si
   -points[5].clone().sub(points[17]).dot(axis));
  if(across.length()<.008)return null;
  across.normalize();
- const normal=new THREE.Vector3().crossVectors(across,axis).normalize()
-  .multiplyScalar(side==="Left"?-1:1);
+ const normal=new THREE.Vector3().crossVectors(across,axis).normalize();
+ if(normal.z<0)normal.negate();
  const lateral=new THREE.Vector3().crossVectors(axis,normal).normalize();
  normal.crossVectors(lateral,axis).normalize();
+ void side;
  const quaternion=new THREE.Quaternion().setFromRotationMatrix(
   new THREE.Matrix4().makeBasis(lateral,axis,normal));
  return {position:points[m].clone().lerp(points[p],.38),quaternion,axis};
@@ -72,14 +73,15 @@ export class UnifiedHandTrack {
   }
   const basis=fingerBasis(this.source,finger,side);
   if(!basis)throw Error("Invalid proximal finger");
+  // Fit only a narrow cross-section around the proximal phalanx.
   const radii=this.vertices.flatMap(v=>{
    const d=v.clone().sub(basis.position),along=d.dot(basis.axis);
-   if(Math.abs(along)>.009)return [];
+   if(Math.abs(along)>.0045)return [];
    d.addScaledVector(basis.axis,-along);
-   const r=d.length();return r>.003&&r<.03?[r]:[];
+   const r=d.length();return r>.004&&r<.015?[r]:[];
   }).sort((a,b)=>a-b);
-  if(radii.length<4)throw Error("No finger cross section");
-  this.ringRadius=radii[Math.floor(radii.length/2)];
+  this.ringRadius=clamp(radii.length>=8?
+   radii[Math.floor(radii.length*.35)]:.009,.0065,.0125);
   this.geometry=new THREE.BufferGeometry();
   const array=new Float32Array(this.vertices.length*3);
   this.vertices.forEach((v,i)=>v.toArray(array,i*3));
