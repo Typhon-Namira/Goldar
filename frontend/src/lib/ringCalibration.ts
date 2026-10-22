@@ -75,7 +75,7 @@ export function inspectRingGeometry(model:THREE.Object3D, override?:RingCalibrat
  // Dodecahedron stone. Its ring hole is along root X, not root Y.
  // Use measured root-space values instead of relying on its bounding box.
  const namedTorus=meshes.find(m=>m.name==="Torus"&&
-  /MODEL_TORUS_A_PART_1_N3D/.test(m.geometry.name||""));
+  m.geometry.getAttribute("position").count===20000);
  const namedStone=meshes.find(m=>m.name==="Dodecahedron");
  if(namedTorus&&namedStone){
   const torusCenter=new THREE.Vector3(0.0149866,0.2123314,0).applyMatrix4(
