@@ -126,6 +126,9 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let captureDepth=0;
    let capturePalm=0,poseTime=0;
    let lastAcceptedCapture=0;
+   let lastStableCenter:{x:number;y:number}|null=null;
+   let lastStableTime=0;
+   let lastStableRotation:THREE.Quaternion|null=null;
    let liveFrame:ReturnType<typeof estimateFingerFrame>=null;
    let livePoints:P[]|null=null;
    let lastVideo=-1,lastRequest=0,busy=false,raf=0,controller:AbortController|null=null;
@@ -181,10 +184,18 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      // A large angle between capture and live MediaPipe poses is expected;
      // transform the snapshot into the current pose instead of rejecting it.
      // Only reject out-of-order results or a currently missing live hand.
-     if(capturedAt<=lastAcceptedCapture||!liveFrame||!livePoints){
+     if(capturedAt<=lastAcceptedCapture||!liveFrame||!livePoints||performance.now()-lastStableTime>500){
       snap.surface.geometry.dispose();
       (snap.surface.material as THREE.Material).dispose();
       setStatus("3D tracking: waiting for live hand landmarks");
+      return;
+     }
+     if(root.visible&&cam&&(
+      Math.abs(captureDepth+snap.anchor.z)>Math.max(.08,captureDepth*.35)||
+      ringPivot.position.distanceTo(snap.anchor)>Math.max(.12,captureDepth*.4)
+     )){
+      snap.surface.geometry.dispose();
+      (snap.surface.material as THREE.Material).dispose();
       return;
      }
      lastAcceptedCapture=capturedAt;
@@ -195,7 +206,9 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      ringPivot.scale.setScalar(snap.ringScale);
      cam=snap.cam;captureFrame=frame;capturePalm=palm;
      captureDepth=-snap.anchor.z;poseTime=performance.now();
-     root.quaternion.copy(liveFrame.quaternion).multiply(frame.quaternion.clone().invert());
+     const correctedRotation=liveFrame.quaternion.clone().multiply(frame.quaternion.clone().invert());
+     if(!root.visible)root.quaternion.copy(correctedRotation);
+     else if(root.quaternion.angleTo(correctedRotation)<.5)root.quaternion.slerp(correctedRotation,.12);
      const live=livePoints;
      const [jm,jp]=FINGERS[finger];
      const centerX=live[jm].x*.58+live[jp].x*.42;
@@ -229,11 +242,23 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21&&world?.length===21){
       const frame=estimateFingerFrame(world,finger,side);
-      if(frame&&frame.confidence>.35){liveFrame=frame;livePoints=points.map(p=>({...p}));}
-      if(root.visible&&captureFrame&&cam&&frame&&frame.confidence>.35){
+      if(frame&&frame.confidence>.35){
+       const [m,p]=FINGERS[finger];
+       const center={x:points[m].x*.58+points[p].x*.42,y:points[m].y*.58+points[p].y*.42};
+       const dt=Math.max(1,now-lastStableTime);
+       const speed=lastStableCenter?Math.hypot(center.x-lastStableCenter.x,center.y-lastStableCenter.y)/dt:0;
+       const rotationJump=lastStableRotation?lastStableRotation.angleTo(frame.quaternion):0;
+       if((!lastStableCenter||speed<.0015||dt>450)&&
+          (!lastStableRotation||rotationJump<.7||dt>450)){
+        liveFrame=frame;livePoints=points.map(p=>({...p}));
+        lastStableCenter=center;lastStableTime=now;
+        lastStableRotation=frame.quaternion.clone();
+       }
+      }
+      if(root.visible&&captureFrame&&cam&&frame&&frame.confidence>.35&&now-lastStableTime<120&&liveFrame===frame){
        // Rotate the entire reconstructed hand and the attached ring together.
        const delta=frame.quaternion.clone().multiply(captureFrame.quaternion.clone().invert());
-       root.quaternion.slerp(delta,root.quaternion.angleTo(delta)>.7?.22:.38);
+       if(root.quaternion.angleTo(delta)<.8)root.quaternion.slerp(delta,.16);
        const [m,p]=FINGERS[finger];
        const center={x:points[m].x*.58+points[p].x*.42,y:points[m].y*.58+points[p].y*.42};
        const palm=Math.hypot(points[5].x-points[17].x,points[5].y-points[17].y);
@@ -249,13 +274,13 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
        const desired=new THREE.Vector3((x-cx)*depth/fx,-(y-cy)*depth/fy,-depth);
        const current=ringPivot.position.clone().applyQuaternion(root.quaternion);
        const shift=desired.sub(current);
-       root.position.lerp(shift,.38);
+       if(root.position.distanceTo(shift)<Math.max(.06,depth*.12))root.position.lerp(shift,.18);
        poseTime=now;
       }
       void request(world,points,side,now);
      }
     }
-    if(now-poseTime>1600)root.visible=false;
+    if(now-poseTime>800)root.visible=false;
     renderer.render(scene,camera);
    };
    cleanup.current=()=>{
