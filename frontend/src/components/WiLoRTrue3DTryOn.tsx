@@ -52,6 +52,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let track:UnifiedHandTrack|null=null;
    let fittedDiameter=0;
    let lastVideo=-1,lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
+   let lastMeshCapture=0;
    let busy=false,raf=0,controller:AbortController|null=null;
    let currentLive:Joint[]|null=null,liveTimestamp=0;
    const stage=document.createElement("canvas");stage.width=480;stage.height=360;
@@ -100,6 +101,9 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      }
      // Keep the existing track if it is healthy: asynchronous mesh replacements
      // must not reset ring orientation or shift the ring every 3.5 seconds.
+     if(captured<=lastMeshCapture)return;
+     // Preserve active tracking; a delayed server snapshot must not
+     // reset a stable ring attachment.
      if(track&&performance.now()-lastGood<750)return;
      const next=new UnifiedHandTrack(hand.mesh,hand.landmarks,finger,hand.side,captured);
      if(!next.update(captureLandmarks,captured)){
@@ -109,6 +113,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       next.dispose();if(!track)setStatus("Waiting for stable finger pose");return;
      }
      replaceTrack(next);
+     lastMeshCapture=captured;
      setStatus("3D active · MANO "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
     }catch(e){if(!disposed&&!track)setStatus("WiLoR: "+(e instanceof Error?e.message:"network error"))}
     finally{busy=false;controller=null}
