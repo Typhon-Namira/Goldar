@@ -59,6 +59,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const handMesh=createHandMeshOccluder();scene.add(handMesh);
    let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number}|null=null;
    let latestPoints:Point[]|null=null;
+   let latestMetric:{anchorDepth:number;pixelsPerMeter:number}|null=null;
    let lastMeshUpdate=0;
    let lastMeshValid=false;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
@@ -82,6 +83,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
     if(!ENDPOINT||!ctx||serverBusy||now-lastServerSent<3500)return;
     serverBusy=true;lastServerSent=now;
     ctx.drawImage(video,0,0,staging.width,staging.height);
+    const capturedAt=performance.now();
     const blob=await new Promise<Blob|null>(resolve=>staging.toBlob(resolve,"image/jpeg",.65));
     if(!blob||disposed){serverBusy=false;return}
     const form=new FormData();form.append("frame",blob,"frame.jpg");form.append("include_mesh","true");
@@ -96,7 +98,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21){setMeshStatus("Mesh: no hand detected");meshSnapshot=null;return;}
      if(hand.mesh?.available&&hand.mesh.vertices?.length&&hand.mesh.faces?.length){
-      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt:performance.now()};
+      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt};
       setMeshStatus(`Mesh: ${hand.mesh.vertices.length} vertices / ${hand.mesh.faces.length} faces`);
      }else{
       meshSnapshot=null;
@@ -145,6 +147,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
          previous:smoother.ready?smoother.rotation:undefined
         }):null;
        const metricRotation=metric?.quaternion;
+       latestMetric=metric?{anchorDepth:metric.anchorDepth,pixelsPerMeter:metric.pixelsPerMeter}:null;
        // Server result only makes small bounded adjustments; decay it rapidly.
        let adjustedScale=scale;
        if(correction){
@@ -163,7 +166,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      }
     }
     // Allow a brief detector dropout; never tie visibility to slow server calls.
-    if(now-lastTracked>850){anchor.visible=false;smoother.reset();latestPoints=null;lastMeshValid=false}
+    if(now-lastTracked>850){anchor.visible=false;smoother.reset();latestPoints=null;latestMetric=null;lastMeshValid=false}
     handMesh.visible=false;
     if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&now-meshSnapshot.capturedAt<4500){
      const fingerJoint=({index:5,middle:9,ring:13,pinky:17} as const)[finger];
@@ -171,6 +174,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
       mesh:handMesh,remote:meshSnapshot.mesh,remoteLandmarks:meshSnapshot.landmarks,
       liveLandmarks:latestPoints,toScreen,width:w,height:h,fingerJoint,
       ringWidthPx:Math.max(8,smoother.scale*diameter),
+      metricDepth:latestMetric??undefined,
      });
      lastMeshValid=valid;
      if(valid){occluder.visible=false;lastMeshUpdate=now;}else handMesh.visible=false;
