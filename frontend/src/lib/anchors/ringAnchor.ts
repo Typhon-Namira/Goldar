@@ -110,26 +110,41 @@ export function estimateAnatomicalRingAnchor(input:{
   if(dorsal.lengthSq()<1e-8)return null;
   dorsal.normalize();
   lateral.crossVectors(axis,dorsal).normalize();
-  // Align the reconstructed 3D phalanx with the image-derived camera axes.
-  // World landmarks have a hand-local origin, so only use their relative
-  // segment direction and never treat their positions as camera coordinates.
+  // Hand-local 3D landmarks provide relative segment orientation, never
+  // camera-space translation. Resolve the local X/Y reflection using the
+  // simultaneously observed screen-space MCP -> PIP direction.
   if(input.worldLandmarks?.length===21 && input.worldLandmarks.every(good)){
     const wp=input.worldLandmarks;
-    const worldAxis=new THREE.Vector3(
-      wp[p].x-wp[m].x,-(wp[p].y-wp[m].y),-(wp[p].z-wp[m].z)
+    const segment=new THREE.Vector3(
+      wp[p].x-wp[m].x, -(wp[p].y-wp[m].y), -(wp[p].z-wp[m].z)
     );
-    if(worldAxis.lengthSq()>1e-9){
-      worldAxis.normalize();
-      // The screen-projected segment disambiguates XY handedness/mirroring.
-      if(worldAxis.x*axis.x+worldAxis.y*axis.y<0)worldAxis.negate();
-      const blend=0.3;
-      const fused=axis.clone().lerp(worldAxis,blend).normalize();
-      if(fused.lengthSq()>0.5){
-        axis.copy(fused);
-        lateral.addScaledVector(axis,-lateral.dot(axis)).normalize();
-        dorsal.crossVectors(lateral,axis).normalize();
-        if(anatomicalSide==="Right")dorsal.negate();
-        lateral.crossVectors(axis,dorsal).normalize();
+    const acrossWorld=new THREE.Vector3(
+      wp[5].x-wp[17].x, -(wp[5].y-wp[17].y), -(wp[5].z-wp[17].z)
+    );
+    if(segment.lengthSq()>1e-9 && acrossWorld.lengthSq()>1e-9){
+      segment.normalize();
+      // Reflection is chosen by the observed projected direction.
+      if(segment.x*axis.x+segment.y*axis.y<0)segment.negate();
+      const fusedAxis=axis.clone().lerp(segment,0.32).normalize();
+      const transverse=acrossWorld.addScaledVector(fusedAxis,-acrossWorld.dot(fusedAxis));
+      if(transverse.lengthSq()>1e-8){
+        transverse.normalize();
+        if(transverse.x*lateral.x+transverse.y*lateral.y<0)transverse.negate();
+        const fusedLateral=lateral.clone().lerp(transverse,0.28);
+        fusedLateral.addScaledVector(fusedAxis,-fusedLateral.dot(fusedAxis));
+        if(fusedLateral.lengthSq()>1e-8){
+          fusedLateral.normalize();
+          const newDorsal=new THREE.Vector3().crossVectors(fusedLateral,fusedAxis).normalize();
+          // Preserve the anatomical dorsal hemisphere. Never silently
+          // switch gemstone from the back of the hand to the palm.
+          if(newDorsal.dot(dorsal)<0){
+            fusedLateral.negate();
+            newDorsal.negate();
+          }
+          axis.copy(fusedAxis);
+          lateral.copy(fusedLateral);
+          dorsal.copy(newDorsal);
+        }
       }
     }
   }
