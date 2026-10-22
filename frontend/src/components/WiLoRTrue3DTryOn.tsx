@@ -159,13 +159,26 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       result=await response.json() as Result;
      }finally{clearTimeout(timeout)}
      if(disposed)return;
-     const hand=result.hands?.[0];
-     if(!hand||hand.side!==side||!hand.mesh?.available){setStatus("3D mesh unavailable; waiting");return}
+     const hands=result.hands??[];
+     // Handedness may disagree across trackers when video is mirrored.
+     // Prefer a valid MANO mesh over an exact handedness label.
+     const candidates=hands.filter(h=>h.mesh?.available&&h.landmarks?.length===21);
+     const hand=candidates.find(h=>h.side===side)||candidates[0];
+     if(!hand){
+      const reason=!hands.length?"no hand detected":hands.map(h=>h.side+
+       ": mesh="+String(h.mesh?.available??false)+
+       " vertices="+String(h.mesh?.vertices?.length??0)).join("; ");
+      setStatus("WiLoR 3D not ready: "+reason);
+      return;
+     }
      const snap=snapshotGeometry(hand,finger,diameter,fit*(product.scale||1));
      const frame=estimateFingerFrame(captureWorld,finger,side);
      const palm=Math.hypot(captureLandmarks[5].x-captureLandmarks[17].x,captureLandmarks[5].y-captureLandmarks[17].y);
-     if(!snap||!frame||frame.confidence<.35||palm<.03)return;
-     if(capturedAt<=lastAcceptedCapture||performance.now()-capturedAt>5500||liveSide!==side||!liveFrame||!livePoints||liveFrame.quaternion.angleTo(frame.quaternion)>1){snap.surface.geometry.dispose();(snap.surface.material as THREE.Material).dispose();return;}
+     if(!snap||!frame||frame.confidence<.35||palm<.03){
+      setStatus("3D calibration pending: "+(!snap?"invalid mesh geometry":!frame?"finger frame unavailable":frame.confidence<.35?"low finger confidence":"palm too small"));
+      return;
+     }
+     if(capturedAt<=lastAcceptedCapture||performance.now()-capturedAt>5500||liveSide!==side||!liveFrame||!livePoints||liveFrame.quaternion.angleTo(frame.quaternion)>1){snap.surface.geometry.dispose();(snap.surface.material as THREE.Material).dispose();setStatus("3D tracking: waiting for a synchronized hand pose");return;}
      lastAcceptedCapture=capturedAt;
      if(surface){root.remove(surface);surface.geometry.dispose();(surface.material as THREE.Material).dispose()}
      surface=snap.surface;root.add(surface);
