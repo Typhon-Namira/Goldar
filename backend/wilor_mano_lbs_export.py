@@ -190,3 +190,26 @@ def inspect_mano_layers(wilor_model):
         report.append({"path": name, "type": type(obj).__name__,
                        "shapes": shapes})
     return report
+
+
+def resolve_wilor_mano_layer(wilor_model):
+    """Resolve the MANO layer confirmed by WiLoR's model constructor.
+
+    WiLoR's wilor/models/wilor.py constructs self.mano = MANO(**mano_cfg)
+    and wilor/models/mano_wrapper.py subclasses smplx.MANOLayer.
+    """
+    layer = getattr(wilor_model, "mano", None)
+    if layer is None:
+        raise ValueError("WiLoR model has no .mano layer")
+    required = ("v_template", "shapedirs", "posedirs", "J_regressor",
+                "lbs_weights")
+    missing = [name for name in required if getattr(layer, name, None) is None]
+    if missing:
+        raise ValueError("WiLoR MANO layer missing: " + ", ".join(missing))
+    return layer
+
+
+def export_loaded_wilor_lbs(wilor_model, out):
+    """Export from the verified self.mano layer, never a guessed layer."""
+    layer = resolve_wilor_mano_layer(wilor_model)
+    return export_wilor_frame_lbs(layer, out)
