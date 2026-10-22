@@ -50,6 +50,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    const light=new THREE.DirectionalLight(0xffffff,2);light.position.set(1,2,1);scene.add(light);
    const ringPivot=new THREE.Group();ringPivot.add(ring);ringPivot.visible=false;scene.add(ringPivot);
    let track:UnifiedHandTrack|null=null;
+   let fittedDiameter=0;
    let lastVideo=-1,lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
    let busy=false,raf=0,controller:AbortController|null=null;
    let currentLive:Joint[]|null=null,liveTimestamp=0;
@@ -67,6 +68,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     if(track){scene.remove(track.occluder);track.dispose()}
     track=next;scene.add(next.occluder);
     const physicalDiameter=next.ringRadius*2*1.06*fit;
+    fittedDiameter=physicalDiameter;
     ringPivot.scale.setScalar(physicalDiameter/Math.max(.00001,calibration.innerDiameter));
     updateSize();
    };
@@ -129,6 +131,10 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
        if(track&&track.update(points,now)){
         ringPivot.position.copy(track.ringPosition);
         ringPivot.quaternion.copy(track.ringRotation);
+        const desired=track.ringRadius*2*1.06*fit;
+        fittedDiameter=THREE.MathUtils.lerp(fittedDiameter,
+         THREE.MathUtils.clamp(desired,fittedDiameter*.985,fittedDiameter*1.015),.2);
+        ringPivot.scale.setScalar(fittedDiameter/Math.max(.00001,calibration.innerDiameter));
         ringPivot.visible=true;track.occluder.visible=true;
         lastGood=now;
        }
