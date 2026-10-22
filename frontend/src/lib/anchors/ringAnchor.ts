@@ -34,7 +34,7 @@ const NEIGHBORS: Record<FingerName,readonly [number,number]> = {
 const good=(p:HandPoint)=>p&&[p.x,p.y,p.z].every(Number.isFinite);
 
 export function estimateAnatomicalRingAnchor(input:{
-  landmarks: readonly HandPoint[];
+  landmarks: readonly HandPoint[];\n  /** Relative 3D reconstruction; orientation only, not metric camera position. */\n  worldLandmarks?: readonly HandPoint[];
   finger: FingerName;
   toScreen:(p:HandPoint)=>{x:number;y:number};
   width:number;height:number;
@@ -108,6 +108,29 @@ export function estimateAnatomicalRingAnchor(input:{
   if(dorsal.lengthSq()<1e-8)return null;
   dorsal.normalize();
   lateral.crossVectors(axis,dorsal).normalize();
+  // Align the reconstructed 3D phalanx with the image-derived camera axes.
+  // World landmarks have a hand-local origin, so only use their relative
+  // segment direction and never treat their positions as camera coordinates.
+  if(input.worldLandmarks?.length===21 && input.worldLandmarks.every(good)){
+    const wp=input.worldLandmarks;
+    const worldAxis=new THREE.Vector3(
+      wp[p].x-wp[m].x,-(wp[p].y-wp[m].y),-(wp[p].z-wp[m].z)
+    );
+    if(worldAxis.lengthSq()>1e-9){
+      worldAxis.normalize();
+      // The screen-projected segment disambiguates XY handedness/mirroring.
+      if(worldAxis.x*axis.x+worldAxis.y*axis.y<0)worldAxis.negate();
+      const blend=0.3;
+      const fused=axis.clone().lerp(worldAxis,blend).normalize();
+      if(fused.lengthSq()>0.5){
+        axis.copy(fused);
+        lateral.addScaledVector(axis,-lateral.dot(axis)).normalize();
+        dorsal.crossVectors(lateral,axis).normalize();
+        if(anatomicalSide==="Right")dorsal.negate();
+        lateral.crossVectors(axis,dorsal).normalize();
+      }
+    }
+  }
   const quaternion=new THREE.Quaternion().setFromRotationMatrix(
     new THREE.Matrix4().makeBasis(lateral,axis,dorsal)
   ).normalize();
