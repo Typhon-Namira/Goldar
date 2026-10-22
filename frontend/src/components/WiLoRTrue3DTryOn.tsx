@@ -1,7 +1,7 @@
 "use client";
 import {useCallback,useEffect,useRef,useState} from "react";
 import * as THREE from "three";
-import {HandLandmarker,FilesetResolver} from "@mediapipe/tasks-vision";
+
 import {GLTFLoader} from "three/examples/jsm/loaders/GLTFLoader.js";
 import type {Product} from "@/lib/api";
 import type {FingerName,HandSide} from "@/lib/handPose";
@@ -9,13 +9,13 @@ import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {UnifiedHandTrack,cameraProjection,type Joint} from "@/lib/unifiedHandTrack";
 import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
 import {parseManoSnapshot,type ManoSnapshot} from "@/lib/manoSnapshot";
+import {skinMano,type ManoRig,type ManoPose} from "@/lib/manoLbs";
 
 type LbsPayload={schemaVersion:number;rig:ManoRig;pose:ManoPose;requiresModelToCameraTransform:boolean};
 type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown;manoLbs?:LbsPayload};
 type RemoteResult={hands?:RemoteHand[];inferenceMs?:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
-const MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-const WASM="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm";
+
 export default function WiLoRTrue3DTryOn({product}:{product:Product}){
  const videoRef=useRef<HTMLVideoElement>(null),canvasRef=useRef<HTMLCanvasElement>(null);
  const cleanup=useRef<()=>void>(()=>{});
@@ -30,17 +30,13 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
   const video=videoRef.current,canvas=canvasRef.current;
   if(!video||!canvas||!product.glb_url||product.category!=="ring")return;
   if(!ENDPOINT){setStatus("WiLoR endpoint not configured");return}
-  stop();setStatus("Loading hand tracker...");
+  stop();setStatus("Starting WiLoR-only tracking...");
   let stream:MediaStream|null=null,disposed=false;
   try{
    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:960},height:{ideal:720}},audio:false});
    video.srcObject=stream;await video.play();
-   const vision=await FilesetResolver.forVisionTasks(WASM);
-   const detector=await HandLandmarker.createFromOptions(vision,{
-    baseOptions:{modelAssetPath:MODEL,delegate:"GPU"},runningMode:"VIDEO",numHands:1
-   });
    const gltf=await new GLTFLoader().loadAsync(product.glb_url);
-   if(disposed){detector.close();return}
+   if(disposed)return
    const calibration=inspectRingGeometry(gltf.scene,{...gltf.scene.userData?.ringCalibration,...product.ring_calibration});
    const ring=attachCalibratedRing(gltf.scene,calibration);
    const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true});
@@ -54,10 +50,10 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let track:UnifiedHandTrack|null=null;
    let fittedDiameter=0;
    let latestMano:ManoSnapshot|null=null;
-   let lastVideo=-1,lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
+   let lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
    let lastMeshCapture=0;
    let busy=false,raf=0,controller:AbortController|null=null;
-   let currentLive:Joint[]|null=null,liveTimestamp=0;
+   
    const stage=document.createElement("canvas");stage.width=480;stage.height=360;
    const ctx=stage.getContext("2d");
    const updateSize=()=>{
@@ -76,10 +72,9 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     ringPivot.scale.setScalar(physicalDiameter/Math.max(.00001,calibration.innerDiameter));
     updateSize();
    };
-   const fetchMesh=async(live:Joint[],side:HandSide,now:number)=>{
-    // WiLoR is an initialization/reacquisition source, not a second live
-    // tracker. Never send snapshots that would only be discarded.
-    if(track||busy||!ctx||now-lastRequest<3500)return;
+   const fetchMesh=async(side:HandSide,now:number)=>{
+    // WiLoR alone supplies tracking snapshots; never mix 2D pose providers.
+    if(busy||!ctx||now-lastRequest<280)return;
     busy=true;lastRequest=now;
     // Capture the complete camera frame with its native aspect ratio.
     // MediaPipe normalized landmarks and WiLoR pixels must refer to the
@@ -92,7 +87,6 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     }
     ctx.drawImage(video,0,0,stage.width,stage.height);
     const captured=performance.now();
-    const captureLandmarks=live.map(p=>({...p}));
     try{
      const blob=await new Promise<Blob|null>(resolve=>stage.toBlob(resolve,"image/jpeg",.75));
      if(!blob||disposed)return;
@@ -109,13 +103,21 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(disposed)return;
      const available=(data.hands||[]).filter(h=>h.mesh?.available&&h.landmarks?.length===21);
      const hand=available.find(h=>h.side===side)||available[0];
+     if(hand)lastLiveSide=hand.side;
      if(!hand?.mesh){if(!track)setStatus("Waiting for WiLoR MANO mesh");return}
-     if(performance.now()-captured>9000||!currentLive||performance.now()-liveTimestamp>350){
-      if(!track)setStatus("Waiting for live hand");return;
-     }
-     // Keep the existing track if it is healthy: asynchronous mesh replacements
-     // must not reset ring orientation or shift the ring every 3.5 seconds.
+     if(performance.now()-captured>9000)return;
+     // Preserve the current track between asynchronous WiLoR updates.
      if(captured<=lastMeshCapture)return;
+     if(track){
+      if(track.update(hand.landmarks,performance.now())){
+       ringPivot.position.copy(track.ringPosition);
+       ringPivot.quaternion.copy(track.ringRotation);
+       ringPivot.visible=true;track.occluder.visible=true;
+       lastGood=performance.now();
+      }
+      lastMeshCapture=captured;
+      return;
+     }
      // MANO supplies the anatomical surface at acquisition. The live
      // camera tracker subsequently moves its locked finger-local frame.
      const parsedMano=parseManoSnapshot(hand.mano);
@@ -151,12 +153,10 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       }catch{/* Incompatible rig: use native WiLoR mesh safely. */}
      }
      const next=new UnifiedHandTrack(acquisitionMesh,hand.landmarks,finger,hand.side,captured,exactLbs?lbs?.rig:undefined);
-     if(!next.update(captureLandmarks,captured)){
+     if(!next.update(hand.landmarks,captured)){
       next.dispose();if(!track)setStatus("Waiting for consistent 3D calibration");return;
      }
-     if(currentLive&&!next.update(currentLive,performance.now())){
-      next.dispose();if(!track)setStatus("Waiting for stable finger pose");return;
-     }
+
      if(track){next.dispose();return}
      replaceTrack(next);
      lastMeshCapture=captured;
@@ -169,36 +169,20 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    const tick=(now:number)=>{
     if(disposed)return;
     raf=requestAnimationFrame(tick);updateSize();
-    if(video.readyState>=2&&video.currentTime!==lastVideo){
-     lastVideo=video.currentTime;
-     const detection=detector.detectForVideo(video,now);
-     const points=detection.landmarks?.[0] as Joint[]|undefined;
-     const handedness=detection.handedness?.[0]?.[0]?.categoryName;
-     const side:HandSide=handedness==="Left"||handedness==="Right"?handedness:"Unknown";
-     if(points?.length===21){
-      // One hand only; prevent identity swaps while a track is active.
-      const sameHand=lastLiveSide==="Unknown"||side==="Unknown"||lastLiveSide===side;
-      if(sameHand){
-       currentLive=points.map(p=>({...p}));liveTimestamp=now;
-       lastLiveSide=side;
-       if(track&&track.update(points,now)){
-        ringPivot.position.copy(track.ringPosition);
-        ringPivot.quaternion.copy(track.ringRotation);
-        // Follow the same deforming surface used for ring position.
-        // Lock the calibrated physical ring diameter for the lifetime of
-        // this track; changing camera distance must not pump its scale.
-        ringPivot.scale.setScalar(fittedDiameter/Math.max(.00001,calibration.innerDiameter));
-        ringPivot.visible=true;track.occluder.visible=true;
-        lastGood=now;
-       }
-       void fetchMesh(points,side,now);
-      }
+    if(video.readyState>=2&&video.videoWidth>0){
+     // WiLoR is the sole tracking authority; do not mix MediaPipe poses.
+     void fetchMesh(lastLiveSide,now);
+     if(track&&track.lastSeen>0&&now-track.lastSeen<700){
+      ringPivot.position.copy(track.ringPosition);
+      ringPivot.quaternion.copy(track.ringRotation);
+      ringPivot.scale.setScalar(fittedDiameter/Math.max(.00001,calibration.innerDiameter));
+      ringPivot.visible=true;track.occluder.visible=true;
      }
     }
-    if(now-lastGood>450){
+    if(now-lastGood>1000){
      ringPivot.visible=false;
      if(track)track.occluder.visible=false;
-     if(now-lastGood>1200){
+     if(now-lastGood>2500){
       lastLiveSide="Unknown";
       // After tracking loss, reacquire against a fresh mesh instead of
       // using a stale finger frame from an earlier camera viewpoint.
@@ -209,7 +193,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     renderer.render(scene,camera);
    };
    cleanup.current=()=>{
-    disposed=true;controller?.abort();cancelAnimationFrame(raf);detector.close();
+    disposed=true;controller?.abort();cancelAnimationFrame(raf);
     stream?.getTracks().forEach(t=>t.stop());video.pause();video.srcObject=null;
     if(track){scene.remove(track.occluder);track.dispose()}
     scene.traverse(o=>{if(o instanceof THREE.Mesh){
@@ -234,7 +218,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    </div>
    <label className="tryon-setting">Finger <select disabled={running} value={finger} onChange={e=>setFinger(e.target.value as FingerName)}>{(["ring","index","middle","pinky"] as const).map(f=><option key={f} value={f}>{f}</option>)}</select></label>
    <label className="tryon-setting">Fit <input type="range" min=".85" max="1.25" step=".025" disabled={running} value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
-   <p className="tryon-disclaimer">Finger-locked MANO surface anchor and adaptive landmark stabilization. When a licensed matching MANO rig is supplied, live deformation uses its anatomical skinning weights with landmark-estimated joint transforms. This is not full pose-corrected MANO or calibrated SLAM.</p>
+   <p className="tryon-disclaimer">WiLoR-only pose tracking. No MediaPipe landmarks are mixed into MANO geometry. Network inference cadence limits smoothness; this is not full frame-rate MANO pose fitting or calibrated SLAM.</p>
   </div>
  </section>;
 }
