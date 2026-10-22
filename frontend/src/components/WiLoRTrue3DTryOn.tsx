@@ -8,8 +8,9 @@ import type {FingerName,HandSide} from "@/lib/handPose";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {UnifiedHandTrack,cameraProjection,type Joint} from "@/lib/unifiedHandTrack";
 import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
+import {parseManoSnapshot,type ManoSnapshot} from "@/lib/manoSnapshot";
 
-type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh};
+type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown};
 type RemoteResult={hands?:RemoteHand[];inferenceMs?:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
 const MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -51,6 +52,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    const ringPivot=new THREE.Group();ringPivot.add(ring);ringPivot.visible=false;scene.add(ringPivot);
    let track:UnifiedHandTrack|null=null;
    let fittedDiameter=0;
+   let latestMano:ManoSnapshot|null=null;
    let lastVideo=-1,lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
    let lastMeshCapture=0;
    let busy=false,raf=0,controller:AbortController|null=null;
@@ -76,6 +78,15 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    const fetchMesh=async(live:Joint[],side:HandSide,now:number)=>{
     if(busy||!ctx||now-lastRequest<3500)return;
     busy=true;lastRequest=now;
+    // Capture the complete camera frame with its native aspect ratio.
+    // MediaPipe normalized landmarks and WiLoR pixels must refer to the
+    // same uncropped image, including portrait mobile video.
+    const captureWidth=480;
+    const captureHeight=Math.max(1,Math.round(captureWidth*video.videoHeight/video.videoWidth));
+    if(!Number.isFinite(captureHeight)||!video.videoWidth)return;
+    if(stage.width!==captureWidth||stage.height!==captureHeight){
+     stage.width=captureWidth;stage.height=captureHeight;
+    }
     ctx.drawImage(video,0,0,stage.width,stage.height);
     const captured=performance.now();
     const captureLandmarks=live.map(p=>({...p}));
@@ -105,6 +116,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      // Preserve active tracking; a delayed server snapshot must not
      // reset a stable ring attachment.
      if(track&&performance.now()-lastGood<750)return;
+     const parsedMano=parseManoSnapshot(hand.mano);
      const next=new UnifiedHandTrack(hand.mesh,hand.landmarks,finger,hand.side,captured);
      if(!next.update(captureLandmarks,captured)){
       next.dispose();if(!track)setStatus("Waiting for consistent 3D calibration");return;
@@ -114,7 +126,9 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      }
      replaceTrack(next);
      lastMeshCapture=captured;
-     setStatus("3D active · MANO "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
+     latestMano=parsedMano;
+     setStatus("3D active · "+(latestMano?"MANO parameters validated":"mesh fallback")+
+      " · "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
     }catch(e){if(!disposed&&!track)setStatus("WiLoR: "+(e instanceof Error?e.message:"network error"))}
     finally{busy=false;controller=null}
    };
