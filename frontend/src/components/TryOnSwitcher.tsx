@@ -2,7 +2,8 @@
 import {useMemo,useState} from "react";
 import type {Product} from "@/lib/api";
 import HandTryOn from "@/components/HandTryOn";
-type Engine="webar"|"legacy";
+import WiLoRTryOn from "@/components/WiLoRTryOn";
+type Engine="webar"|"legacy"|"wilor";
 export default function TryOnSwitcher({product}:{product:Product}){
  const [engine,setEngine]=useState<Engine>("legacy");
  const [running,setRunning]=useState(false);
@@ -19,10 +20,11 @@ export default function TryOnSwitcher({product}:{product:Product}){
    <div className="tryon-controlrow">
     <button type="button" className={"btn "+(engine==="webar"?"gold":"ghost")} onClick={()=>switchEngine("webar")}>WEBAR.ROCKS — EXPERIMENTAL</button>
     <button type="button" className={"btn "+(engine==="legacy"?"gold":"ghost")} onClick={()=>switchEngine("legacy")}>MEDIAPIPE — OLD</button>
+    <button type="button" className={"btn "+(engine==="wilor"?"gold":"ghost")} onClick={()=>switchEngine("wilor")}>WiLoR — SERVER EXPERIMENT</button>
    </div>
-   <p className="tryon-disclaimer">Experimental A/B test. WebAR.rocks runs in an isolated camera frame. It uses your Goldar GLB but its default demo calibration may not fit this ring without adjustment. Both engines process camera video on-device.</p>
+   <p className="tryon-disclaimer">Experimental A/B test. WebAR.rocks runs in an isolated camera frame. It uses your Goldar GLB but its default demo calibration may not fit this ring without adjustment. MediaPipe and WebAR.rocks process on-device; WiLoR sends compressed camera frames to your configured server.</p>
   </div>
-  {engine==="legacy"?<HandTryOn key={"old-"+version} product={product}/>:<>
+  {engine==="legacy"?<HandTryOn key={"old-"+version} product={product}/>:engine==="wilor"?<WiLoRTryOn key={"wilor-"+version} product={product}/>:<>
    {!running?<div className="tryon-viewport" style={{minHeight:400,display:"grid",placeItems:"center",padding:22,textAlign:"center"}}>
      <div><h3>Goldar Ring Engine V4</h3><p>Test the WebAR.rocks ring tracker with this product.</p>
      <button type="button" className="btn gold" onClick={()=>setRunning(true)}>START WEBAR TRY-ON →</button></div>
