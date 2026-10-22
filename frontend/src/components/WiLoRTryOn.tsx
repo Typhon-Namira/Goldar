@@ -5,9 +5,10 @@ import {PoseSmoother,type FingerName,type HandSide} from "@/lib/handPose";
 import {solveCameraRingPose} from "@/lib/cameraRingGeometry";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {createFingerOccluder,resizeFingerOccluder} from "@/lib/fingerOcclusion";
+import {createHandMeshOccluder,updateHandMeshOccluder,type RemoteHandMesh} from "@/lib/handMeshOcclusion";
 
 type Point={x:number;y:number;z:number};
-type ServerHand={side:"Left"|"Right";landmarks:Point[];worldLandmarks:Point[]};
+type ServerHand={side:"Left"|"Right";landmarks:Point[];worldLandmarks:Point[];mesh?:RemoteHandMesh};
 type ServerResponse={detected:boolean;hands:ServerHand[];inferenceMs:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
 const MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -25,7 +26,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
  const [running,setRunning]=useState(false),[status,setStatus]=useState("Hybrid tracking: on-device MediaPipe + optional WiLoR corrections.");
  const [finger,setFinger]=useState<FingerName>("ring"),[facing,setFacing]=useState<"user"|"environment">("environment");
  const [fit,setFit]=useState(1),[widthCalibration,setWidthCalibration]=useState(1);
- const [occlusion,setOcclusion]=useState(false),[serverLatency,setServerLatency]=useState<number|null>(null);
+ const [occlusion,setOcclusion]=useState(true),[serverLatency,setServerLatency]=useState<number|null>(null);
  const stop=useCallback(()=>{cleanupRef.current();cleanupRef.current=()=>{};setRunning(false)},[]);
  useEffect(()=>()=>cleanupRef.current(),[]);
  const start=useCallback(async()=>{
@@ -53,22 +54,25 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const diameter=Math.max(calibration.innerDiameter,1e-5);
    const occluder=createFingerOccluder(diameter);occluder.visible=false;anchor.add(occluder);
    const smoother=new PoseSmoother();
+   const handMesh=createHandMeshOccluder();scene.add(handMesh);
+   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number}|null=null;
+   let latestPoints:Point[]|null=null;
    const staging=document.createElement("canvas");staging.width=480;staging.height=360;
    const ctx=staging.getContext("2d");
    let raf=0,lastVideoTime=-1,lastTracked=0,lastServerSent=0,serverBusy=false,controller:AbortController|null=null;
    let correction:{dx:number;dy:number;scale:number;time:number}|null=null;
-   let latestLocal:Point[]|null=null;
+   
    const toScreen=(p:Point)=>{
     const w=canvas.clientWidth,h=canvas.clientHeight,vw=video.videoWidth||w,vh=video.videoHeight||h;
     const s=Math.max(w/vw,h/vh);return {x:p.x*vw*s+(w-vw*s)/2,y:p.y*vh*s+(h-vh*s)/2};
    };
-   const solve=(points:Point[],side:HandSide)=>{
+   const solve=(points:Point[],side:HandSide,world?:Point[])=>{
     const w=canvas.clientWidth,h=canvas.clientHeight;
     return solveCameraRingPose({landmarks:points,finger,toScreen,width:w,height:h,holeDiameter:diameter,
-     anchorFraction:product.ring_calibration?.anchorFraction??.38,
+     anchorFraction:product.ring_calibration?.anchorFraction??.52,
      fitMultiplier:fit*(product.scale||1)*(product.ring_calibration?.fitMultiplier??1),
      widthCalibration,reportedSide:side,cameraFacing:facing,
-     previousQuaternion:smoother.ready?smoother.rotation:undefined});
+     worldLandmarks:world,previousQuaternion:smoother.ready?smoother.rotation:undefined});
    };
    const sendCorrection=async(points:Point[],side:HandSide,now:number)=>{
     if(!ENDPOINT||!ctx||serverBusy||now-lastServerSent<3500)return;
@@ -76,7 +80,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
     ctx.drawImage(video,0,0,staging.width,staging.height);
     const blob=await new Promise<Blob|null>(resolve=>staging.toBlob(resolve,"image/jpeg",.65));
     if(!blob||disposed){serverBusy=false;return}
-    const form=new FormData();form.append("frame",blob,"frame.jpg");
+    const form=new FormData();form.append("frame",blob,"frame.jpg");form.append("include_mesh","true");
     controller=new AbortController();
     const timeout=setTimeout(()=>controller?.abort(),12000);
     try{
@@ -87,8 +91,11 @@ export default function WiLoRTryOn({product}:{product:Product}){
      setServerLatency(result.inferenceMs);
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21)return;
+     if(hand.mesh?.available&&hand.mesh.vertices?.length&&hand.mesh.faces?.length){
+      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt:performance.now()};
+     }
      // The server result corresponds to the captured frame, not the current frame.
-     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side);
+     const localPose=solve(points,side),remotePose=solve(hand.landmarks,hand.side,hand.worldLandmarks);
      if(!localPose||!remotePose)return;
      const dx=remotePose.position.x-localPose.position.x,dy=remotePose.position.y-localPose.position.y;
      const ratio=remotePose.scale/localPose.scale;
@@ -113,14 +120,16 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const label=detection.handedness?.[0]?.[0]?.categoryName;
      const side:HandSide=label==="Left"||label==="Right"?label:"Unknown";
      if(points?.length===21){
-      latestLocal=points;
-      const solved=solve(points,side);
+
+      latestPoints=points;
+      const world=detection.worldLandmarks?.[0] as Point[]|undefined;
+      const solved=solve(points,side,world);
       if(solved){
        const position=solved.position.clone(),scale=solved.scale;
        // Server result only makes small bounded adjustments; decay it rapidly.
        let adjustedScale=scale;
        if(correction){
-        const weight=Math.max(0,1-(now-correction.time)/1200)*.12;
+        const weight=Math.max(0,1-(now-correction.time)/1000)*.06;
         position.x+=correction.dx*weight;position.y+=correction.dy*weight;
         adjustedScale*=1+(correction.scale-1)*weight;
        }
@@ -135,7 +144,16 @@ export default function WiLoRTryOn({product}:{product:Product}){
      }
     }
     // Allow a brief detector dropout; never tie visibility to slow server calls.
-    if(now-lastTracked>700){anchor.visible=false;smoother.reset()}
+    if(now-lastTracked>850){anchor.visible=false;smoother.reset();latestPoints=null}
+    handMesh.visible=false;
+    if(occlusion&&anchor.visible&&meshSnapshot&&latestPoints&&now-meshSnapshot.capturedAt<6000){
+     const fingerJoint=({index:5,middle:9,ring:13,pinky:17} as const)[finger];
+     const valid=updateHandMeshOccluder({
+      mesh:handMesh,remote:meshSnapshot.mesh,remoteLandmarks:meshSnapshot.landmarks,
+      liveLandmarks:latestPoints,toScreen,width:w,height:h,fingerJoint,
+     });
+     if(valid)occluder.visible=false;
+    }
     renderer.render(scene,camera);
    };
    cleanupRef.current=()=>{
@@ -162,7 +180,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    <label className="tryon-setting">Finger <select value={finger} disabled={running} onChange={e=>setFinger(e.target.value as FingerName)}>{(["ring","index","middle","pinky"] as const).map(v=><option key={v} value={v}>{v}</option>)}</select></label>
    <label className="tryon-setting">Visual fit <input type="range" min=".6" max="1.5" step=".05" disabled={running} value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
    <label className="tryon-setting">Finger width <input type="range" min=".75" max="1.35" step=".025" disabled={running} value={widthCalibration} onChange={e=>setWidthCalibration(Number(e.target.value))}/></label>
-   <label className="tryon-setting">Experimental finger occlusion <input type="checkbox" disabled={running} checked={occlusion} onChange={e=>setOcclusion(e.target.checked)}/></label>
+   <label className="tryon-setting">Finger depth occlusion <input type="checkbox" disabled={running} checked={occlusion} onChange={e=>setOcclusion(e.target.checked)}/></label>
    <p className="tryon-disclaimer">On-device tracking runs continuously; optional compressed frames are sent to WiLoR for bounded corrections. WebAR.rocks remains available as a separate fallback. Stop and restart to apply settings. Visual preview only, not a ring-size measurement.</p>
   </div>
  </section>;

@@ -35,6 +35,8 @@ const good=(p:HandPoint)=>p&&[p.x,p.y,p.z].every(Number.isFinite);
 
 export function estimateAnatomicalRingAnchor(input:{
   landmarks: readonly HandPoint[];
+  /** Relative 3D reconstruction; orientation only, not metric camera position. */
+  worldLandmarks?: readonly HandPoint[];
   finger: FingerName;
   toScreen:(p:HandPoint)=>{x:number;y:number};
   width:number;height:number;
@@ -108,11 +110,49 @@ export function estimateAnatomicalRingAnchor(input:{
   if(dorsal.lengthSq()<1e-8)return null;
   dorsal.normalize();
   lateral.crossVectors(axis,dorsal).normalize();
+  // Hand-local 3D landmarks provide relative segment orientation, never
+  // camera-space translation. Resolve the local X/Y reflection using the
+  // simultaneously observed screen-space MCP -> PIP direction.
+  if(input.worldLandmarks?.length===21 && input.worldLandmarks.every(good)){
+    const wp=input.worldLandmarks;
+    const segment=new THREE.Vector3(
+      wp[p].x-wp[m].x, -(wp[p].y-wp[m].y), -(wp[p].z-wp[m].z)
+    );
+    const acrossWorld=new THREE.Vector3(
+      wp[5].x-wp[17].x, -(wp[5].y-wp[17].y), -(wp[5].z-wp[17].z)
+    );
+    if(segment.lengthSq()>1e-9 && acrossWorld.lengthSq()>1e-9){
+      segment.normalize();
+      // Reflection is chosen by the observed projected direction.
+      if(segment.x*axis.x+segment.y*axis.y<0)segment.negate();
+      const fusedAxis=axis.clone().lerp(segment,0.32).normalize();
+      const transverse=acrossWorld.addScaledVector(fusedAxis,-acrossWorld.dot(fusedAxis));
+      if(transverse.lengthSq()>1e-8){
+        transverse.normalize();
+        if(transverse.x*lateral.x+transverse.y*lateral.y<0)transverse.negate();
+        const fusedLateral=lateral.clone().lerp(transverse,0.28);
+        fusedLateral.addScaledVector(fusedAxis,-fusedLateral.dot(fusedAxis));
+        if(fusedLateral.lengthSq()>1e-8){
+          fusedLateral.normalize();
+          const newDorsal=new THREE.Vector3().crossVectors(fusedLateral,fusedAxis).normalize();
+          // Preserve the anatomical dorsal hemisphere. Never silently
+          // switch gemstone from the back of the hand to the palm.
+          if(newDorsal.dot(dorsal)<0){
+            fusedLateral.negate();
+            newDorsal.negate();
+          }
+          axis.copy(fusedAxis);
+          lateral.copy(fusedLateral);
+          dorsal.copy(newDorsal);
+        }
+      }
+    }
+  }
   const quaternion=new THREE.Quaternion().setFromRotationMatrix(
     new THREE.Matrix4().makeBasis(lateral,axis,dorsal)
   ).normalize();
 
-  const t=THREE.MathUtils.clamp(anchorFraction,0.05,0.65);
+  const t=THREE.MathUtils.clamp(anchorFraction,0.05,0.82);
   const position=mcp.clone().lerp(pip,t);
   // The renderer is a pixel-space orthographic projection. Relative depth
   // changes do not move the on-screen center and must remain bounded.
@@ -121,6 +161,7 @@ export function estimateAnatomicalRingAnchor(input:{
   const neighbor=NEIGHBORS[finger];
   const spacing=cameraPoint(neighbor[0]).distanceTo(cameraPoint(neighbor[1]));
   const widthProxy=Math.min(handBreadth*0.29,Math.max(handBreadth*0.16,spacing*0.68));
+  // Projected landmark span grows with camera approach; preserve that natural scale.
   const fingerWidthPx=widthProxy*widthCalibration;
   const scale=fingerWidthPx/holeDiameter*fitMultiplier;
   if(!Number.isFinite(scale)||scale<=0||![position.x,position.y,position.z,quaternion.x,quaternion.y,quaternion.z,quaternion.w].every(Number.isFinite))return null;
