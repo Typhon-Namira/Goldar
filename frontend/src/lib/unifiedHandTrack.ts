@@ -54,9 +54,11 @@ export class UnifiedHandTrack {
  readonly finger:FingerName;
  readonly side:HandSide;
  ringRadius:number;
- private readonly fingerVertexIds:number[]=[];
  private filteredDepth=0;
  private readonly lockedRadius:number;
+ private readonly localSurfaceOffset=new THREE.Vector3();
+ private readonly filteredImage:Joint[]=[];
+ private readonly sourceNormalized:Joint[];
  readonly createdAt:number;
  lastSeen=0;
  private lastInput=0;
@@ -67,6 +69,7 @@ export class UnifiedHandTrack {
   const c=mesh.camera;
   if(![c.fx,c.fy,c.width,c.height].every(v=>finite(v)&&v>0))throw Error("Invalid camera calibration");
   this.camera=c;this.finger=finger;this.side=side;this.createdAt=createdAt;
+  this.sourceNormalized=landmarks.map(p=>({...p}));
   this.source=landmarks.map(p=>lift(p,c));
   if(this.source.some(p=>![p.x,p.y,p.z].every(finite)))throw Error("Invalid source joints");
   this.vertices=mesh.vertices.map(v=>new THREE.Vector3(v[0],-v[1],-v[2]));
@@ -88,18 +91,23 @@ export class UnifiedHandTrack {
   this.ringRadius=clamp(radii.length>=8?
    radii[Math.floor(radii.length*.35)]:.009,.0065,.0125);
   this.lockedRadius=this.ringRadius;
-  // Cache only MANO vertices belonging to the selected proximal phalanx.
-  // A generic slice through the whole hand includes palm and other fingers.
-  const [mcp,pip]=BONES[finger];
-  const bone=this.source[pip].clone().sub(this.source[mcp]);
-  const boneLength=bone.length();
-  const boneAxis=bone.clone().normalize();
-  for(let i=0;i<this.initial.length;i++){
-   const offset=this.initial[i].clone().sub(this.source[mcp]);
-   const t=offset.dot(boneAxis);
-   const radial=offset.addScaledVector(boneAxis,-t).length();
-   if(t>boneLength*.14&&t<boneLength*.8&&radial<.017)
-    this.fingerVertexIds.push(i);
+  // Bind the ring to a single rest-pose MANO surface cross-section.
+  // Store the offset in finger-local coordinates so it rotates with the
+  // phalanx rather than drifting as a newly estimated centroid each frame.
+  const skinSection:THREE.Vector3[]=[];
+  for(const vertex of this.vertices){
+   const d=vertex.clone().sub(basis.position);
+   const along=d.dot(basis.axis);
+   if(Math.abs(along)>.0035)continue;
+   d.addScaledVector(basis.axis,-along);
+   const radius=d.length();
+   if(radius>.004&&radius<.015)skinSection.push(d);
+  }
+  if(skinSection.length>=12){
+   const mean=new THREE.Vector3();
+   for(const v of skinSection)mean.add(v);
+   mean.multiplyScalar(1/skinSection.length).clampLength(0,.002);
+   this.localSurfaceOffset.copy(mean.applyQuaternion(basis.quaternion.clone().invert()));
   }
   this.geometry=new THREE.BufferGeometry();
   const array=new Float32Array(this.vertices.length*3);
@@ -125,7 +133,24 @@ export class UnifiedHandTrack {
  update(live:readonly Joint[],now:number):boolean{
   if(live.length!==21||live.some(p=>![p.x,p.y,p.z].every(finite)))return false;
   const srcWidth=Math.hypot(this.source[5].x-this.source[17].x,this.source[5].y-this.source[17].y);
-  const imageWidth=Math.hypot(live[5].x-live[17].x,live[5].y-live[17].y);
+  // Smooth image observations before perspective lifting. This avoids
+  // amplifying subpixel landmark jitter into centimetre-scale 3D motion.
+  const dtInput=Math.min(100,Math.max(1,now-this.lastInput));
+  const motion=this.filteredImage.length?
+   Math.hypot(live[13].x-this.filteredImage[13].x,live[13].y-this.filteredImage[13].y):1;
+  const imageTau=motion<.002?85:motion<.008?38:12;
+  const imageAlpha=this.filteredImage.length?
+   clamp(1-Math.exp(-dtInput/imageTau),.06,.92):1;
+  for(let i=0;i<21;i++){
+   if(!this.filteredImage[i])this.filteredImage[i]={...live[i]};
+   else {
+    this.filteredImage[i].x+=imageAlpha*(live[i].x-this.filteredImage[i].x);
+    this.filteredImage[i].y+=imageAlpha*(live[i].y-this.filteredImage[i].y);
+    this.filteredImage[i].z+=imageAlpha*(live[i].z-this.filteredImage[i].z);
+   }
+  }
+  const observed=this.filteredImage;
+  const imageWidth=Math.hypot(observed[5].x-observed[17].x,observed[5].y-observed[17].y);
   if(imageWidth<.025||!finite(imageWidth)||srcWidth<.005)return false;
   const referenceWidth=Math.hypot(
    (this.source[5].x/-this.source[5].z*this.camera.fx-this.source[17].x/-this.source[17].z*this.camera.fx)/this.camera.width,
@@ -142,8 +167,8 @@ export class UnifiedHandTrack {
   const ratios:number[]=[];
   for(const [a,b] of bones){
    const baseline=this.source[a].distanceTo(this.source[b]);
-   const dx=(live[a].x-live[b].x)*this.camera.width/this.camera.fx;
-   const dy=(live[a].y-live[b].y)*this.camera.height/this.camera.fy;
+   const dx=(observed[a].x-observed[b].x)*this.camera.width/this.camera.fx;
+   const dy=(observed[a].y-observed[b].y)*this.camera.height/this.camera.fy;
    const imageLength=Math.hypot(dx,dy);
    if(imageLength>.003&&baseline>.006)ratios.push(baseline/imageLength);
   }
@@ -169,10 +194,21 @@ export class UnifiedHandTrack {
     clamp(1-Math.exp(-dt/180),.02,.5));
   }
   const globalDepth=this.filteredDepth;
-  const targets=live.map((p,i)=>{
-   // Preserve relative MANO depth offsets; translate the hand as a whole
-   // using the multi-bone estimate. Avoid interpreting MediaPipe z as meters.
-   const depth=clamp(globalDepth+(-this.source[i].z-rootDepth),.08,4);
+  // MediaPipe z is relative to the wrist and roughly normalized by image
+  // width. Calibrate its per-frame depth variation against the WiLoR rest
+  // hand; blend conservatively to avoid unphysical depth pumping.
+  const zBaseline=this.sourceNormalized[0].z;
+  const sourcePalmSpan=this.source[5].distanceTo(this.source[17]);
+  const normalizedPalmSpan=Math.max(.025,Math.hypot(
+   this.sourceNormalized[5].x-this.sourceNormalized[17].x,
+   this.sourceNormalized[5].y-this.sourceNormalized[17].y));
+  const zMetersPerUnit=clamp(sourcePalmSpan/normalizedPalmSpan,.04,.5);
+  const targets=observed.map((p,i)=>{
+   const modelOffset=-this.source[i].z-rootDepth;
+   const liveOffset=(p.z-observed[0].z)*zMetersPerUnit;
+   const referenceOffset=(this.sourceNormalized[i].z-zBaseline)*zMetersPerUnit;
+   const offset=modelOffset+clamp(liveOffset-referenceOffset,-.045,.045)*.65;
+   const depth=clamp(globalDepth+offset,.08,4);
    return lift({x:p.x,y:p.y,z:depth},this.camera);
   });
   const basis=fingerBasis(targets,this.finger,this.side);
@@ -223,32 +259,10 @@ export class UnifiedHandTrack {
    }
    v.toArray(array,i*3);
   }
-  const crossSection:{radial:THREE.Vector3;radius:number}[]=[];
-  const center=smoothed.position.clone();
-  const axis=smoothed.axis;
-  const point=new THREE.Vector3();
-  for(const i of this.fingerVertexIds){
-   point.fromArray(array,i*3).sub(center);
-   const along=point.dot(axis);
-   if(Math.abs(along)>.004)continue;
-   const radial=point.clone().addScaledVector(axis,-along);
-   const radius=radial.length();
-   if(radius>.003&&radius<.018)crossSection.push({radial,radius});
-  }
-  let surfaceCenter=center;
-  if(crossSection.length>=10){
-   crossSection.sort((a,b)=>a.radius-b.radius);
-   const section=crossSection.slice(0,Math.max(8,Math.floor(crossSection.length*.8)));
-   const offset=new THREE.Vector3();
-   for(const v of section)offset.add(v.radial);
-   offset.multiplyScalar(1/section.length).clampLength(0,.0025);
-   surfaceCenter=center.clone().add(offset);
-   const radii=section.map(v=>v.radial.distanceTo(offset)).sort((a,b)=>a-b);
-   const measured=clamp(radii[Math.floor(radii.length*.6)],.006,.0125);
-   // Keep physical ring size locked for this hand. Mesh deformation
-   // can be noisy, so a new cross-section must not resize the jewelry.
-   void measured;
-  }
+  // A fixed anatomical attachment in the proximal-phalanx frame.
+  // Never re-fit the centroid from a deforming mesh each video frame.
+  const surfaceCenter=smoothed.position.clone().add(
+   this.localSurfaceOffset.clone().applyQuaternion(smoothed.quaternion));
   // Ring transform and occlusion use the same filtered finger pose.
   // Do not smooth twice: the joint positions were already filtered above.
   this.ringPosition.copy(surfaceCenter);
