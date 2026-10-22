@@ -180,7 +180,18 @@ export class UnifiedHandTrack {
   const candidates:{radial:THREE.Vector3;r:number}[]=[];
   const center=smoothed.position;
   const candidate=new THREE.Vector3();
+  const [fingerMcp,fingerPip]=BONES[this.finger];
+  const sourceBase=this.source[fingerMcp];
+  const sourceTip=this.source[fingerPip];
+  const sourceAxis=sourceTip.clone().sub(sourceBase).normalize();
   for(let i=0;i<this.initial.length;i++){
+   // Preserve vertex identity from the captured proximal finger segment;
+   // otherwise adjacent fingers and the palm contaminate the section.
+   const original=this.initial[i].clone().sub(sourceBase);
+   const boneT=original.dot(sourceAxis);
+   if(boneT<.006||boneT>.026)continue;
+   const originalRadial=original.addScaledVector(sourceAxis,-boneT).length();
+   if(originalRadial>.016)continue;
    candidate.fromArray(array,i*3).sub(center);
    const along=candidate.dot(normal);
    if(Math.abs(along)>.005)continue;
