@@ -291,3 +291,28 @@ def compare_wilor_mano_vertices(wilor_model, out):
         "passesOneMillimeterNative": bool(diff_native.max() < .001),
         "passesOneMillimeterWilor": bool(diff_wilor.max() < .001),
     }
+
+
+def compare_wilor_camera_vertices(wilor_model, out, right, camera_t):
+    """Validate full WiLoR -> camera mesh transform against the existing API.
+
+    Mirrors the implementation in goldar_wilor_api._mesh_payload:
+    vertices[:,0] *= (2 * right - 1); vertices += camera_t.
+    No assumed intrinsic camera calibration is involved.
+    """
+    metrics = compare_wilor_mano_vertices(wilor_model, out)
+    native = _numpy(out["pred_vertices"][0])
+    camera = _numpy(camera_t).reshape(3)
+    handedness = float(2 * right - 1)
+    if native.shape != (778, 3) or not np.isfinite(camera).all():
+        raise ValueError("Invalid WiLoR camera geometry")
+    projected = native.copy()
+    projected[:, 0] *= handedness
+    projected += camera[None, :]
+    if not np.isfinite(projected).all() or projected[:, 2].min() <= 0:
+        raise ValueError("Invalid camera-space MANO vertices")
+    metrics["cameraSpaceVertexCount"] = int(len(projected))
+    metrics["cameraDepthMinMeters"] = float(projected[:, 2].min())
+    metrics["handednessMultiplierX"] = handedness
+    metrics["cameraTransform"] = "mirror_x_then_translate"
+    return metrics
