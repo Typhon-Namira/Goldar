@@ -115,7 +115,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(captured<=lastMeshCapture)return;
      // Preserve active tracking; a delayed server snapshot must not
      // reset a stable ring attachment.
-     if(track&&performance.now()-lastGood<750)return;
+     // A newer capture refreshes MANO shape/depth; keep the previous ring\n     // transform as the continuity prior instead of discarding every update.
      const parsedMano=parseManoSnapshot(hand.mano);
      const next=new UnifiedHandTrack(hand.mesh,hand.landmarks,finger,hand.side,captured);
      if(!next.update(captureLandmarks,captured)){
@@ -124,7 +124,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(currentLive&&!next.update(currentLive,performance.now())){
       next.dispose();if(!track)setStatus("Waiting for stable finger pose");return;
      }
-     replaceTrack(next);
+     if(track){\n      next.ringPosition.copy(track.ringPosition);\n      next.ringRotation.copy(track.ringRotation);\n     }\n     replaceTrack(next);
      lastMeshCapture=captured;
      latestMano=parsedMano;
      setStatus("3D active · "+(latestMano?"MANO parameters validated":"mesh fallback")+
