@@ -190,10 +190,10 @@ export class PoseSmoother {
   ready = false;
   lastTime = 0;
   lastObservation = 0;
-  private readonly px = new OneEuroScalar(1.35, 0.035);
-  private readonly py = new OneEuroScalar(1.35, 0.035);
-  private readonly pz = new OneEuroScalar(1.35, 0.035);
-  private readonly size = new OneEuroScalar(1.1, 0.025);
+  private readonly px = new OneEuroScalar(0.9, 0.018);
+  private readonly py = new OneEuroScalar(0.9, 0.018);
+  private readonly pz = new OneEuroScalar(0.9, 0.018);
+  private readonly size = new OneEuroScalar(0.8, 0.014);
 
   reset() {
     this.ready = false;
@@ -244,7 +244,7 @@ export class PoseSmoother {
     if (this.rotation.dot(targetRotation) < 0) targetRotation.set(
       -targetRotation.x,-targetRotation.y,-targetRotation.z,-targetRotation.w);
     const angularError = this.rotation.angleTo(targetRotation);
-    const alpha = 1 - Math.exp(-dt * (7 + Math.min(1,angularError/0.6) * 11));
+    const alpha = 1 - Math.exp(-dt * (5 + Math.min(1,angularError/0.6) * 10));
     this.rotation.slerp(targetRotation,alpha).normalize();
     this.lastTime = time;
     this.lastObservation = time;
