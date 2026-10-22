@@ -151,3 +151,42 @@ def export_wilor_frame_lbs(model, out):
     betas = _numpy(params["betas"]).reshape(-1)
     rotations = extract_wilor_local_rotations(out)
     return export_mano_lbs(model, betas, rotations)
+
+
+def inspect_mano_layers(wilor_model):
+    """Safe metadata-only discovery of candidate MANO layers.
+
+    Does not serialize licensed template vertices, weights, checkpoints,
+    user frames, or parameters. Suitable for a read-only EC2 diagnostic.
+    """
+    candidates = [("model", wilor_model)]
+    for name in ("mano", "mano_layer", "mano_right", "mano_left",
+                 "mano_head", "mano_model", "smplx", "head"):
+        obj = getattr(wilor_model, name, None)
+        if obj is not None:
+            candidates.append((name, obj))
+    for name, obj in list(candidates):
+        for child in ("mano", "mano_layer", "mano_right", "mano_left",
+                      "mano_head", "mano_model", "smplx"):
+            nested = getattr(obj, child, None)
+            if nested is not None:
+                candidates.append((name + "." + child, nested))
+    report = []
+    seen = set()
+    attributes = ("v_template", "shapedirs", "posedirs", "J_regressor",
+                  "kintree_table", "lbs_weights", "weights", "faces",
+                  "faces_tensor")
+    for name, obj in candidates:
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        shapes = {}
+        for attr in attributes:
+            value = getattr(obj, attr, None)
+            if value is None:
+                continue
+            shape = getattr(value, "shape", None)
+            shapes[attr] = list(shape) if shape is not None else "present"
+        report.append({"path": name, "type": type(obj).__name__,
+                       "shapes": shapes})
+    return report
