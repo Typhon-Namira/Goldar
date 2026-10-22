@@ -5,7 +5,7 @@ import HandTryOn from "@/components/HandTryOn";
 import WiLoRTryOn from "@/components/WiLoRTryOn";
 type Engine="webar"|"legacy"|"wilor";
 export default function TryOnSwitcher({product}:{product:Product}){
- const [engine,setEngine]=useState<Engine>("legacy");
+ const [engine,setEngine]=useState<Engine>("wilor");
  const [running,setRunning]=useState(false);
  const [version,setVersion]=useState(0);
  const [scale,setScale]=useState(.421);
@@ -20,9 +20,9 @@ export default function TryOnSwitcher({product}:{product:Product}){
    <div className="tryon-controlrow">
     <button type="button" className={"btn "+(engine==="webar"?"gold":"ghost")} onClick={()=>switchEngine("webar")}>WEBAR.ROCKS — EXPERIMENTAL</button>
     <button type="button" className={"btn "+(engine==="legacy"?"gold":"ghost")} onClick={()=>switchEngine("legacy")}>MEDIAPIPE — OLD</button>
-    <button type="button" className={"btn "+(engine==="wilor"?"gold":"ghost")} onClick={()=>switchEngine("wilor")}>WiLoR — SERVER EXPERIMENT</button>
+    <button type="button" className={"btn "+(engine==="wilor"?"gold":"ghost")} onClick={()=>switchEngine("wilor")}>HYBRID — MEDIAPIPE + WiLoR</button>
    </div>
-   <p className="tryon-disclaimer">Experimental A/B test. WebAR.rocks runs in an isolated camera frame. It uses your Goldar GLB but its default demo calibration may not fit this ring without adjustment. MediaPipe and WebAR.rocks process on-device; WiLoR sends compressed camera frames to your configured server.</p>
+   <p className="tryon-disclaimer">Hybrid mode uses MediaPipe for live tracking and WiLoR for occasional server corrections. WebAR.rocks runs separately as a fallback because its isolated camera tracker cannot share pose data directly.</p>
   </div>
   {engine==="legacy"?<HandTryOn key={"old-"+version} product={product}/>:engine==="wilor"?<WiLoRTryOn key={"wilor-"+version} product={product}/>:<>
    {!running?<div className="tryon-viewport" style={{minHeight:400,display:"grid",placeItems:"center",padding:22,textAlign:"center"}}>
