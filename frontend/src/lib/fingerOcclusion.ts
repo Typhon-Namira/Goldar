@@ -13,7 +13,7 @@ export function createFingerOccluder(innerDiameter: number): THREE.Mesh {
   }
   const radius = innerDiameter * 0.43;
   const geometry = new THREE.CylinderGeometry(
-    radius * 0.94, radius, innerDiameter * 1.85, 48, 1, false,
+    radius * 0.94, radius, innerDiameter * 2.6, 64, 1, false,
   );
   const material = new THREE.MeshBasicMaterial({
     colorWrite: false,
@@ -29,7 +29,7 @@ export function createFingerOccluder(innerDiameter: number): THREE.Mesh {
   occluder.renderOrder = -20;
   // In canonical frame +Z means outside/dorsal. Slightly behind ring center
   // keeps visible jewelry in front, while masking the ring's far-side band.
-  occluder.position.z = -innerDiameter * 0.025;
+  occluder.position.z = 0;
   return occluder;
 }
 
