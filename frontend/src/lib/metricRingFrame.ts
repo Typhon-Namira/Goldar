@@ -3,7 +3,7 @@ import type {FingerName} from "./handPose";
 import type {MeshPoint,RemoteHandMesh} from "./handMeshOcclusion";
 
 const joints:Record<FingerName,[number,number]>={index:[5,6],middle:[9,10],ring:[13,14],pinky:[17,18]};
-const point=(p:MeshPoint)=>new THREE.Vector3(p.x,-p.y,-p.z);
+const point=(p:MeshPoint,cam:RemoteHandMesh["camera"])=>new THREE.Vector3((p.x*cam.width-cam.cx)*p.z/cam.fx,-(p.y*cam.height-cam.cy)*p.z/cam.fy,-p.z);
 const finite=(p:MeshPoint)=>[p.x,p.y,p.z].every(Number.isFinite);
 
 /**
@@ -24,9 +24,9 @@ export function solveMetricRingFrame(args:{
  !Number.isFinite(cam.fx)||!Number.isFinite(cam.fy)||cam.fx<=0||cam.fy<=0||
  diameter<=0||width<=0||height<=0)return null;
  const [m,p]=joints[finger],t=THREE.MathUtils.clamp(args.anchorFraction,.18,.7);
- const mcp=point(landmarks[m]),pip=point(landmarks[p]);
+ const mcp=point(landmarks[m],cam),pip=point(landmarks[p],cam);
  const axis=pip.clone().sub(mcp).normalize();
- const transverse=point(landmarks[5]).sub(point(landmarks[17]));
+ const transverse=point(landmarks[5],cam).sub(point(landmarks[17],cam));
  transverse.addScaledVector(axis,-transverse.dot(axis)).normalize();
  if(axis.lengthSq()<.9||transverse.lengthSq()<.9)return null;
  const normal=new THREE.Vector3().crossVectors(transverse,axis).normalize();
