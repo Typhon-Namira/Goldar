@@ -14,6 +14,10 @@ import * as THREE from "three";
 export type ManoRig = {
   templateVertices: number[][];
   shapeOffsets?: number[][];
+  /** Precomputed pose-corrective displacement for this pose (778 x 3).
+   * Must be derived from the MANO posedirs basis and 15 local rotations
+   * on the backend, in the exact same rest-space coordinate system. */
+  poseOffsets?: number[][];
   restJoints: number[][];
   parents: number[];
   weights: number[][];
@@ -32,6 +36,8 @@ export function validateManoRig(rig:ManoRig):void {
   if(rig.templateVertices.length!==778||rig.weights.length!==778||
      rig.restJoints.length!==16||rig.parents.length!==16||
      rig.parents[0]!==-1)throw new Error("Invalid MANO rig dimensions");
+  if(rig.poseOffsets&&rig.poseOffsets.length!==778)
+    throw new Error("Invalid MANO pose offsets");
   if(rig.shapeOffsets&&rig.shapeOffsets.length!==778)
     throw new Error("Invalid MANO shape offsets");
   for(let i=0;i<16;i++){
@@ -42,6 +48,7 @@ export function validateManoRig(rig:ManoRig):void {
   for(let i=0;i<778;i++){
     if(!isVec3(rig.templateVertices[i])||
        (rig.shapeOffsets&&!isVec3(rig.shapeOffsets[i]))||
+       (rig.poseOffsets&&!isVec3(rig.poseOffsets[i]))||
        !Array.isArray(rig.weights[i])||rig.weights[i].length!==16||
        rig.weights[i].some(w=>!Number.isFinite(w)||w<0)||
        Math.abs(rig.weights[i].reduce((a,b)=>a+b,0)-1)>.02)
@@ -82,7 +89,9 @@ export function skinMano(rig:ManoRig,pose:ManoPose):{
   const translation=new THREE.Vector3(...pose.rootTranslation);
   const vertices=rig.templateVertices.map((v,i)=>{
     const offset=rig.shapeOffsets?.[i]??[0,0,0];
-    const rest=new THREE.Vector3(v[0]+offset[0],v[1]+offset[1],v[2]+offset[2]);
+    const poseOffset=rig.poseOffsets?.[i]??[0,0,0];
+    const rest=new THREE.Vector3(v[0]+offset[0]+poseOffset[0],
+      v[1]+offset[1]+poseOffset[1],v[2]+offset[2]+poseOffset[2]);
     const out=new THREE.Vector3();
     for(let j=0;j<16;j++){
       const w=rig.weights[i][j];
