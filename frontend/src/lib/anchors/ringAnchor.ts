@@ -112,7 +112,7 @@ export function estimateAnatomicalRingAnchor(input:{
     new THREE.Matrix4().makeBasis(lateral,axis,dorsal)
   ).normalize();
 
-  const t=THREE.MathUtils.clamp(anchorFraction,0.05,0.65);
+  const t=THREE.MathUtils.clamp(anchorFraction,0.05,0.82);
   const position=mcp.clone().lerp(pip,t);
   // The renderer is a pixel-space orthographic projection. Relative depth
   // changes do not move the on-screen center and must remain bounded.
@@ -121,7 +121,7 @@ export function estimateAnatomicalRingAnchor(input:{
   const neighbor=NEIGHBORS[finger];
   const spacing=cameraPoint(neighbor[0]).distanceTo(cameraPoint(neighbor[1]));
   const widthProxy=Math.min(handBreadth*0.29,Math.max(handBreadth*0.16,spacing*0.68));
-  const fingerWidthPx=widthProxy*widthCalibration;
+  // Projected landmark span grows with camera approach; preserve that natural scale.\n  const fingerWidthPx=widthProxy*widthCalibration;
   const scale=fingerWidthPx/holeDiameter*fitMultiplier;
   if(!Number.isFinite(scale)||scale<=0||![position.x,position.y,position.z,quaternion.x,quaternion.y,quaternion.z,quaternion.w].every(Number.isFinite))return null;
   const quality=THREE.MathUtils.clamp(lateralSize/handBreadth,0,1)*
