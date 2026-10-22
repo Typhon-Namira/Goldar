@@ -51,7 +51,8 @@ export class UnifiedHandTrack {
  readonly current:THREE.Vector3[]=[];
  readonly finger:FingerName;
  readonly side:HandSide;
- readonly ringRadius:number;
+ ringRadius:number;
+
  readonly createdAt:number;
  lastSeen=0;
  private lastInput=0;
@@ -151,9 +152,6 @@ export class UnifiedHandTrack {
   }
   const smoothed=fingerBasis(this.current,this.finger,this.side);
   if(!smoothed)return false;
-  this.ringPosition.copy(smoothed.position);
-  if(this.lastInput===0)this.ringRotation.copy(smoothed.quaternion);
-  else this.ringRotation.slerp(smoothed.quaternion,alpha).normalize();
   const attribute=this.geometry.getAttribute("position") as THREE.BufferAttribute;
   const array=attribute.array as Float32Array;
   for(let i=0;i<this.initial.length;i++){
@@ -175,6 +173,53 @@ export class UnifiedHandTrack {
    }
    v.toArray(array,i*3);
   }
+  // Fit the ring to the ACTUAL deformed MANO finger surface on every frame.
+  // The proximal joint frame supplies the plane; only skin vertices in that
+  // plane determine its cross-sectional center and physical radius.
+  const normal=smoothed.axis;
+  const candidates:{radial:THREE.Vector3;r:number}[]=[];
+  const center=smoothed.position;
+  const candidate=new THREE.Vector3();
+  const [fingerMcp,fingerPip]=BONES[this.finger];
+  const sourceBase=this.source[fingerMcp];
+  const sourceTip=this.source[fingerPip];
+  const sourceAxis=sourceTip.clone().sub(sourceBase).normalize();
+  for(let i=0;i<this.initial.length;i++){
+   // Preserve vertex identity from the captured proximal finger segment;
+   // otherwise adjacent fingers and the palm contaminate the section.
+   const original=this.initial[i].clone().sub(sourceBase);
+   const boneT=original.dot(sourceAxis);
+   if(boneT<.006||boneT>.026)continue;
+   const originalRadial=original.addScaledVector(sourceAxis,-boneT).length();
+   if(originalRadial>.016)continue;
+   candidate.fromArray(array,i*3).sub(center);
+   const along=candidate.dot(normal);
+   if(Math.abs(along)>.005)continue;
+   const radial=candidate.clone().addScaledVector(normal,-along);
+   const r=radial.length();
+   if(r>.0035&&r<.022)candidates.push({radial,r});
+  }
+  let surfaceCenter=center.clone();
+  let surfaceRadius=this.ringRadius;
+  if(candidates.length>=12){
+   // Reject vertices belonging to neighboring fingers or the palm.
+   candidates.sort((a,b)=>a.r-b.r);
+   const cutoff=candidates[Math.floor(candidates.length*.65)].r;
+   const section=candidates.filter(v=>v.r<=cutoff);
+   const bias=new THREE.Vector3();
+   for(const v of section)bias.add(v.radial);
+   bias.multiplyScalar(1/section.length);
+   // Avoid allowing asymmetric visibility/topology to shift the ring off bone.
+   bias.clampLength(0,.003);
+   surfaceCenter.add(bias);
+   const adjusted=section.map(v=>v.radial.distanceTo(bias)).sort((a,b)=>a-b);
+   surfaceRadius=clamp(adjusted[Math.floor(adjusted.length*.55)],.0065,.0125);
+  }
+  if(this.lastInput===0)this.ringPosition.copy(surfaceCenter);
+  else this.ringPosition.lerp(surfaceCenter,alpha);
+  if(this.lastInput===0)this.ringRotation.copy(smoothed.quaternion);
+  else this.ringRotation.slerp(smoothed.quaternion,alpha).normalize();
+  this.ringRadius=THREE.MathUtils.lerp(this.ringRadius,surfaceRadius,alpha*.3);
   attribute.needsUpdate=true;
   this.geometry.computeBoundingSphere();
   this.lastSeen=now;this.lastInput=now;
