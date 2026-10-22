@@ -19,14 +19,14 @@ export function createFingerOccluder(innerDiameter: number): THREE.Mesh {
     colorWrite: false,
     depthWrite: true,
     depthTest: true,
-    side: THREE.FrontSide,
+    side: THREE.DoubleSide,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
   });
   const occluder = new THREE.Mesh(geometry, material);
   occluder.name = "GoldarDepthOnlyFinger";
-  occluder.renderOrder = -20;
+  // Depth-only geometry must render before the ring and camera-space jewelry.\n  occluder.renderOrder = -20;
   // In canonical frame +Z means outside/dorsal. Slightly behind ring center
   // keeps visible jewelry in front, while masking the ring's far-side band.
   occluder.position.z = 0;
