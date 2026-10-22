@@ -31,7 +31,9 @@ export function fingerBasis(points:readonly THREE.Vector3[],finger:FingerName,si
  if(across.length()<.008)return null;
  across.normalize();
  const normal=new THREE.Vector3().crossVectors(across,axis).normalize();
- if(normal.z<0)normal.negate();
+ // Never orient the finger frame toward the camera: that flips the ring
+ // by 180 degrees when the hand rotates through a side-on view.
+ // The palm's anatomical cross-product provides a continuous frame.
  const lateral=new THREE.Vector3().crossVectors(axis,normal).normalize();
  normal.crossVectors(lateral,axis).normalize();
  void side;
@@ -54,6 +56,7 @@ export class UnifiedHandTrack {
  ringRadius:number;
  private readonly fingerVertexIds:number[]=[];
  private filteredDepth=0;
+ private readonly lockedRadius:number;
  readonly createdAt:number;
  lastSeen=0;
  private lastInput=0;
@@ -84,6 +87,7 @@ export class UnifiedHandTrack {
   }).sort((a,b)=>a-b);
   this.ringRadius=clamp(radii.length>=8?
    radii[Math.floor(radii.length*.35)]:.009,.0065,.0125);
+  this.lockedRadius=this.ringRadius;
   // Cache only MANO vertices belonging to the selected proximal phalanx.
   // A generic slice through the whole hand includes palm and other fingers.
   const [mcp,pip]=BONES[finger];
@@ -145,14 +149,24 @@ export class UnifiedHandTrack {
   }
   ratios.sort((a,b)=>a-b);
   const median=ratios.length?ratios[Math.floor(ratios.length/2)]:rootDepth*referenceWidth/imageWidth;
-  const estimatedDepth=clamp(median,rootDepth*.65,rootDepth*1.5);
+  // A rotated finger appears shorter in the image. Do not let individual
+  // finger foreshortening make the entire hand jump in depth.
+  // Use palm width as the primary stable scale cue, and use the bone
+  // estimate only when it broadly agrees with that measurement.
+  const palmDepth=rootDepth*referenceWidth/imageWidth;
+  const estimatedDepth=clamp(
+   median>palmDepth*.82&&median<palmDepth*1.18?
+    palmDepth*.85+median*.15:palmDepth,
+   rootDepth*.55,rootDepth*1.8);
   if(this.filteredDepth===0)this.filteredDepth=estimatedDepth;
   else {
    const dt=Math.max(1,now-this.lastInput);
-   const maxStep=this.filteredDepth*.14*Math.min(dt/1000,.1);
+   // A bounded velocity keeps noisy monocular depth from pumping ring
+   // scale while allowing genuine camera approach/retreat over time.
+   const maxStep=this.filteredDepth*.65*Math.min(dt/1000,.1);
    const target=clamp(estimatedDepth,this.filteredDepth-maxStep,this.filteredDepth+maxStep);
    this.filteredDepth=THREE.MathUtils.lerp(this.filteredDepth,target,
-    clamp(1-Math.exp(-dt/220),.02,.35));
+    clamp(1-Math.exp(-dt/180),.02,.5));
   }
   const globalDepth=this.filteredDepth;
   const targets=live.map((p,i)=>{
@@ -168,7 +182,12 @@ export class UnifiedHandTrack {
    const dt=now-this.lastInput;
    if(dt<450&&(jump>.075||this.ringRotation.angleTo(basis.quaternion)>1.05))return false;
   }
-  const alpha=this.current.length?clamp(1-Math.exp(-Math.max(1,now-this.lastInput)/48),.06,.55):1;
+  const dt=Math.min(100,Math.max(1,now-this.lastInput));
+  const movement=this.current.length?basis.position.distanceTo(this.ringPosition):1;
+  // Adaptive One-Euro-like response: damp sub-millimetre landmark jitter
+  // at rest, but follow real motion promptly rather than dragging the ring.
+  const tau=movement<.0015?95:movement<.004?55:18;
+  const alpha=this.current.length?clamp(1-Math.exp(-dt/tau),.05,.88):1;
   for(let i=0;i<21;i++){
    if(!this.current[i])this.current[i]=targets[i].clone();
    else this.current[i].lerp(targets[i],alpha);
@@ -226,12 +245,16 @@ export class UnifiedHandTrack {
    surfaceCenter=center.clone().add(offset);
    const radii=section.map(v=>v.radial.distanceTo(offset)).sort((a,b)=>a-b);
    const measured=clamp(radii[Math.floor(radii.length*.6)],.006,.0125);
-   this.ringRadius=THREE.MathUtils.lerp(this.ringRadius,measured,alpha*.25);
+   // Keep physical ring size locked for this hand. Mesh deformation
+   // can be noisy, so a new cross-section must not resize the jewelry.
+   void measured;
   }
-  if(this.lastInput===0)this.ringPosition.copy(surfaceCenter);
-  else this.ringPosition.lerp(surfaceCenter,alpha);
+  // Ring transform and occlusion use the same filtered finger pose.
+  // Do not smooth twice: the joint positions were already filtered above.
+  this.ringPosition.copy(surfaceCenter);
   if(this.lastInput===0)this.ringRotation.copy(smoothed.quaternion);
   else this.ringRotation.slerp(smoothed.quaternion,alpha).normalize();
+  this.ringRadius=this.lockedRadius;
   attribute.needsUpdate=true;
   this.geometry.computeBoundingSphere();
   this.lastSeen=now;this.lastInput=now;
