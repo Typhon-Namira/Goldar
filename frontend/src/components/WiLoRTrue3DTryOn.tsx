@@ -76,14 +76,16 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     updateSize();
    };
    const fetchMesh=async(live:Joint[],side:HandSide,now:number)=>{
-    if(busy||!ctx||now-lastRequest<3500)return;
+    // WiLoR is an initialization/reacquisition source, not a second live
+    // tracker. Never send snapshots that would only be discarded.
+    if(track||busy||!ctx||now-lastRequest<3500)return;
     busy=true;lastRequest=now;
     // Capture the complete camera frame with its native aspect ratio.
     // MediaPipe normalized landmarks and WiLoR pixels must refer to the
     // same uncropped image, including portrait mobile video.
     const captureWidth=480;
     const captureHeight=Math.max(1,Math.round(captureWidth*video.videoHeight/video.videoWidth));
-    if(!Number.isFinite(captureHeight)||!video.videoWidth)return;
+    if(!Number.isFinite(captureHeight)||!video.videoWidth){busy=false;return}
     if(stage.width!==captureWidth||stage.height!==captureHeight){
      stage.width=captureWidth;stage.height=captureHeight;
     }
@@ -113,9 +115,8 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      // Keep the existing track if it is healthy: asynchronous mesh replacements
      // must not reset ring orientation or shift the ring every 3.5 seconds.
      if(captured<=lastMeshCapture)return;
-     // Preserve active tracking; a delayed server snapshot must not
-     // reset a stable ring attachment.
-     // A newer capture refreshes MANO shape/depth; keep the previous ring\n     // transform as the continuity prior instead of discarding every update.
+     // MANO supplies the anatomical surface at acquisition. The live
+     // camera tracker subsequently moves its locked finger-local frame.
      const parsedMano=parseManoSnapshot(hand.mano);
      const next=new UnifiedHandTrack(hand.mesh,hand.landmarks,finger,hand.side,captured);
      if(!next.update(captureLandmarks,captured)){
@@ -124,16 +125,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(currentLive&&!next.update(currentLive,performance.now())){
       next.dispose();if(!track)setStatus("Waiting for stable finger pose");return;
      }
-     if(track){
-      // A delayed server response may update hand shape, but must never
-      // re-anchor a ring that is already tracking live camera landmarks.
-      // Keep the active track until it is lost; the next acquisition can
-      // safely use the latest WiLoR snapshot.
-      next.dispose();
-      lastMeshCapture=captured;
-      latestMano=parsedMano;
-      return;
-     }
+     if(track){next.dispose();return}
      replaceTrack(next);
      lastMeshCapture=captured;
      latestMano=parsedMano;
@@ -210,7 +202,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    </div>
    <label className="tryon-setting">Finger <select disabled={running} value={finger} onChange={e=>setFinger(e.target.value as FingerName)}>{(["ring","index","middle","pinky"] as const).map(f=><option key={f} value={f}>{f}</option>)}</select></label>
    <label className="tryon-setting">Fit <input type="range" min=".85" max="1.25" step=".025" disabled={running} value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
-   <p className="tryon-disclaimer">Unified camera coordinates, finger-local ring transform, joint-weighted MANO skin deformation and depth-only occlusion. Monocular depth remains an estimate; validate on mobile.</p>
+   <p className="tryon-disclaimer">Finger-locked MANO surface anchor, adaptive landmark stabilization and perspective depth tracking. Mesh deformation is joint-weighted approximation, not exact MANO LBS; monocular camera calibration remains approximate.</p>
   </div>
  </section>;
 }
