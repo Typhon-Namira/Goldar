@@ -6,6 +6,7 @@ import {solveCameraRingPose} from "@/lib/cameraRingGeometry";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {createFingerOccluder,resizeFingerOccluder} from "@/lib/fingerOcclusion";
 import {createHandMeshOccluder,updateHandMeshOccluder,type RemoteHandMesh} from "@/lib/handMeshOcclusion";
+import {solveMetricRingFrame} from "@/lib/metricRingFrame";
 
 type Point={x:number;y:number;z:number};
 type ServerHand={side:"Left"|"Right";landmarks:Point[];worldLandmarks:Point[];mesh?:RemoteHandMesh};
@@ -56,7 +57,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
    const occluder=createFingerOccluder(diameter);occluder.visible=false;anchor.add(occluder);
    const smoother=new PoseSmoother();
    const handMesh=createHandMeshOccluder();scene.add(handMesh);
-   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];capturedAt:number}|null=null;
+   let meshSnapshot:{mesh:RemoteHandMesh;landmarks:Point[];worldLandmarks:Point[];capturedAt:number}|null=null;
    let latestPoints:Point[]|null=null;
    let lastMeshUpdate=0;
    let lastMeshValid=false;
@@ -95,7 +96,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
      const hand=result.hands?.[0];
      if(!hand||hand.landmarks?.length!==21){setMeshStatus("Mesh: no hand detected");meshSnapshot=null;return;}
      if(hand.mesh?.available&&hand.mesh.vertices?.length&&hand.mesh.faces?.length){
-      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,capturedAt:performance.now()};
+      meshSnapshot={mesh:hand.mesh,landmarks:hand.landmarks,worldLandmarks:hand.worldLandmarks,capturedAt:performance.now()};
       setMeshStatus(`Mesh: ${hand.mesh.vertices.length} vertices / ${hand.mesh.faces.length} faces`);
      }else{
       meshSnapshot=null;
@@ -133,6 +134,17 @@ export default function WiLoRTryOn({product}:{product:Product}){
       const solved=solve(points,side,world);
       if(solved){
        const position=solved.position.clone(),scale=solved.scale;
+       // WiLoR metric camera-space joints provide 3D rotation;
+       // live MediaPipe continues to drive 2D translation every frame.
+       const metric=meshSnapshot&&now-meshSnapshot.capturedAt<4500&&
+        meshSnapshot.worldLandmarks?.length===21
+        ?solveMetricRingFrame({
+         finger,landmarks:meshSnapshot.worldLandmarks,mesh:meshSnapshot.mesh,
+         toScreen,width:w,height:h,diameter,fitMultiplier:fit*(product.scale||1),
+         anchorFraction:product.ring_calibration?.anchorFraction??.52,
+         previous:smoother.ready?smoother.rotation:undefined
+        }):null;
+       const metricRotation=metric?.quaternion;
        // Server result only makes small bounded adjustments; decay it rapidly.
        let adjustedScale=scale;
        if(correction){
@@ -140,7 +152,7 @@ export default function WiLoRTryOn({product}:{product:Product}){
         position.x+=correction.dx*weight;position.y+=correction.dy*weight;
         adjustedScale*=1+(correction.scale-1)*weight;
        }
-       if(smoother.update(position,solved.quaternion,adjustedScale,now)){
+       if(smoother.update(position,metricRotation??solved.quaternion,adjustedScale,now)){
         anchor.position.copy(smoother.position);anchor.quaternion.copy(smoother.rotation);
         anchor.scale.setScalar(smoother.scale);anchor.visible=true;lastTracked=now;
         occluder.visible=occlusion;
