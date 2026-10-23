@@ -1,5 +1,5 @@
-/* Ring Atelier: one fitting experience, independent of tracking internals. */
-.ring-atelier {
+/* Face Atelier: one fitting experience, independent of tracking internals. */
+.face-atelier {
   max-width: 1040px;
   margin: 0 auto;
   background: #f8f5ef;
@@ -247,25 +247,6 @@
   letter-spacing: 0.04em;
   color: #6b675b;
 }
-.atelier-fingers {
-  display: flex;
-  gap: 6px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-.atelier-fingers button {
-  background: transparent;
-  border: 1px solid #dcd5c6;
-  padding: 10px 18px;
-  font-size: 10px;
-  color: #777162;
-  cursor: pointer;
-}
-.atelier-fingers button[aria-pressed="true"] {
-  background: #30392e;
-  color: #f3ead8;
-  border-color: #30392e;
-}
 .atelier-fit {
   width: 210px;
   padding-top: 2px;
@@ -297,9 +278,9 @@
   text-align: center;
   padding: 40px;
 }
-.ring-atelier button:focus-visible,
-.ring-atelier a:focus-visible,
-.ring-atelier input:focus-visible {
+.face-atelier button:focus-visible,
+.face-atelier a:focus-visible,
+.face-atelier input:focus-visible {
   outline: 2px solid #b69960;
   outline-offset: 4px;
 }
@@ -337,8 +318,5 @@
   .atelier-stop {
     right: 17px;
     bottom: 17px;
-  }
-  .atelier-fingers button {
-    padding: 10px 16px;
   }
 }

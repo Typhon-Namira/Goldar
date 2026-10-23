@@ -2,7 +2,7 @@ import { API, Product, Store } from "@/lib/api";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import ModelViewer from "@/components/ModelViewer";
-import RingAtelier from "@/components/RingAtelier";
+import FaceAtelier from "@/components/FaceAtelier";
 export default async function ARPage({
   params,
 }: {
@@ -16,7 +16,7 @@ export default async function ARPage({
   if (!response.ok) notFound();
   const { product: p, store: s }: { product: Product; store: Store } =
     await response.json();
-  const hand = p.category === "ring";
+  const face = p.category === "earring" || p.category === "necklace";
   return (
     <main className="catalog luxe-catalog">
       <div className="luxe-topline">
@@ -42,14 +42,16 @@ export default async function ARPage({
           </h1>
           <p>Discover the piece on your own terms, in every dimension.</p>
         </div>
-        {hand && p.ar_enabled && p.glb_url ? (
-          <RingAtelier product={p} />
+        {face && p.ar_enabled && p.glb_url ? (
+          <FaceAtelier product={p} />
         ) : (
           <div className="ar-unavailable">
-            <h2 className="serif">Live body try-on is in development.</h2>
+            <h2 className="serif">
+              Face fitting supports earrings and necklaces.
+            </h2>
             <p>
-              Virtual fitting is available for rings. Other jewelry categories
-              require dedicated tracking and calibration.
+              Choose an earring or necklace with an enabled 3D model to start
+              your preview.
             </p>
           </div>
         )}

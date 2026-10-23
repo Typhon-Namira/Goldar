@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import create_engine, String, Integer, Float, DateTime, Boolean, ForeignKey, Text, select, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, Session, sessionmaker
@@ -62,7 +63,7 @@ class Product(Base):
     slug: Mapped[str] = mapped_column(String(90))
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="")
-    category: Mapped[str] = mapped_column(String(20), default="ring")
+    category: Mapped[str] = mapped_column(String(20), default="earring")
     metal: Mapped[str] = mapped_column(String(80), default="")
     weight_grams: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     size_label: Mapped[str] = mapped_column(String(80), default="")
@@ -74,20 +75,21 @@ class Product(Base):
     published: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     store: Mapped[Store] = relationship(back_populates="products")
-    ring_calibration: Mapped[Optional["RingCalibrationRecord"]] = relationship(cascade="all, delete-orphan", uselist=False)
+    face_calibration: Mapped[Optional["FaceCalibrationRecord"]] = relationship(cascade="all, delete-orphan", uselist=False)
 
-class RingCalibrationRecord(Base):
-    __tablename__ = "ring_calibrations"
+class FaceCalibrationRecord(Base):
+    __tablename__ = "face_calibrations"
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), primary_key=True)
     config_json: Mapped[str] = mapped_column(Text, default="{}")
 
-class RingCalibrationInput(BaseModel):
-    center: tuple[float,float,float] | None = None
-    holeAxis: tuple[float,float,float] | None = None
-    stoneDirection: tuple[float,float,float] | None = None
-    innerDiameter: float | None = Field(default=None, gt=0)
-    fitMultiplier: float = Field(default=1.0, ge=0.6, le=1.5)
-    anchorFraction: float = Field(default=0.22, ge=0.05, le=0.65)
+class FaceCalibrationInput(BaseModel):
+    height_mm: float = Field(default=35, ge=2, le=600)
+    offset_mm: tuple[float,float,float] = (0,0,0)
+    rotation_deg: tuple[float,float,float] = (0,0,0)
+    anchor: tuple[float,float,float] = (0.5,1,0.5)
+    side: str = "both"
+    ear_anchor: str = "auto"
+    model_config = ConfigDict(allow_inf_nan=False)
 
 class StoreInput(BaseModel):
     name: str = Field(min_length=2, max_length=120)
@@ -104,7 +106,7 @@ class ProductInput(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     slug: str = Field(min_length=2, max_length=90)
     description: str = ""
-    category: str = "ring"
+    category: str = "earring"
     metal: str = ""
     weight_grams: Optional[float] = Field(default=None, ge=0)
     size_label: str = ""
@@ -153,13 +155,18 @@ def product_dict(p):
     "category":p.category,"metal":p.metal,"weight_grams":p.weight_grams,"size_label":p.size_label,
     "cover_url":p.cover_url,"glb_url":p.glb_url,"usdz_url":p.usdz_url,"scale":p.scale,
     "ar_enabled":p.ar_enabled,"published":p.published,"created_at":p.created_at.isoformat(),
-    "ring_calibration":json.loads(p.ring_calibration.config_json) if p.ring_calibration else None,
+    "face_calibration":json.loads(p.face_calibration.config_json) if p.face_calibration else None,
     "product_url":f"{settings.public_base_url}/s/{p.store.slug}/p/{p.slug}",
     "ar_url":f"{settings.public_base_url}/ar/{p.id}"}
 
 app = FastAPI(title="Goldar API", version="0.1.0")
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request, exc):
+    # Do not echo credentials or non-JSON numeric inputs from validation errors.
+    return JSONResponse(status_code=422, content={"detail":[{"loc":list(e["loc"]),"msg":e["msg"],"type":e["type"]} for e in exc.errors()]})
+
 app.add_middleware(CORSMiddleware, allow_origins=[v.strip() for v in settings.cors_origins.split(",") if v.strip()],
-                   allow_methods=["GET","POST","PATCH","DELETE"], allow_headers=["Authorization","Content-Type"])
+                   allow_methods=["GET","POST","PUT","PATCH","DELETE"], allow_headers=["Authorization","Content-Type"])
 @app.on_event("startup")
 def initialize():
     Base.metadata.create_all(engine)
@@ -209,7 +216,7 @@ def admin_products(store_id:str,_:bool=Depends(admin),session:Session=Depends(db
 @app.post("/api/admin/stores/{store_id}/products",status_code=201)
 def create_product(store_id:str,body:ProductInput,_:bool=Depends(admin),session:Session=Depends(db)):
     check_slug(body.slug)
-    if body.category not in ("ring","bracelet","necklace","earring"): raise HTTPException(422,"Invalid category")
+    if body.category not in ("necklace","earring"): raise HTTPException(422,"Invalid category")
     if not session.get(Store,store_id): raise HTTPException(404,"Store not found")
     if session.scalar(select(Product).where(Product.store_id==store_id,Product.slug==body.slug)):
         raise HTTPException(409,"Product slug already exists in this store")
@@ -220,25 +227,27 @@ def update_product(product_id:str,body:ProductInput,_:bool=Depends(admin),sessio
     p=session.get(Product,product_id)
     if not p: raise HTTPException(404,"Product not found")
     check_slug(body.slug)
-    if body.category not in ("ring","bracelet","necklace","earring"): raise HTTPException(422,"Invalid category")
+    if body.category not in ("necklace","earring"): raise HTTPException(422,"Invalid category")
     exists=session.scalar(select(Product).where(Product.store_id==p.store_id,Product.slug==body.slug))
     if exists and exists.id!=p.id: raise HTTPException(409,"Product slug already exists")
     for key,val in body.model_dump().items(): setattr(p,key,val)
     session.commit();return product_dict(p)
 
-@app.put("/api/admin/products/{product_id}/ring-calibration")
-def save_ring_calibration(product_id:str,body:RingCalibrationInput,_:bool=Depends(admin),session:Session=Depends(db)):
+@app.put("/api/admin/products/{product_id}/face-calibration")
+def save_face_calibration(product_id:str,body:FaceCalibrationInput,_:bool=Depends(admin),session:Session=Depends(db)):
     p=session.get(Product,product_id)
     if not p: raise HTTPException(404,"Product not found")
-    if p.category!="ring": raise HTTPException(422,"Calibration only applies to rings")
-    config=body.model_dump(exclude_none=True)
-    record=session.get(RingCalibrationRecord,product_id)
+    if p.category not in ("earring","necklace"): raise HTTPException(422,"Face fitting supports earrings and necklaces")
+    if body.side not in ("both","left","right") or body.ear_anchor not in ("auto","lobe") or any(v<0 or v>1 for v in body.anchor):
+        raise HTTPException(422,"Invalid attachment calibration")
+    if any(abs(v)>1000 for v in body.offset_mm) or any(abs(v)>360 for v in body.rotation_deg):
+        raise HTTPException(422,"Calibration exceeds supported range")
+    record=session.get(FaceCalibrationRecord,product_id)
     if not record:
-        record=RingCalibrationRecord(product_id=product_id)
+        record=FaceCalibrationRecord(product_id=product_id)
         session.add(record)
-    record.config_json=json.dumps(config)
-    session.commit()
-    session.refresh(p)
+    record.config_json=json.dumps(body.model_dump())
+    session.commit();session.refresh(p)
     return product_dict(p)
 
 @app.delete("/api/admin/products/{product_id}",status_code=204)
@@ -312,7 +321,7 @@ def admin_all_products(
     if store_id:
         query=query.where(Product.store_id==store_id)
     if category:
-        if category not in ("ring","bracelet","necklace","earring"):
+        if category not in ("necklace","earring"):
             raise HTTPException(422,"Unsupported jewelry category")
         query=query.where(Product.category==category)
     return [product_dict(p) for p in session.scalars(query.limit(limit).offset(offset)).all()]

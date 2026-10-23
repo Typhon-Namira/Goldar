@@ -8,13 +8,13 @@ export default function FittingGuide() {
           A new <em>perspective.</em>
         </h1>
         <p>
-          Open a ring from your collection and choose virtual fitting. Place one
-          hand in soft, even light, gently separate your fingers, and move
-          slowly to explore the piece.
+          Open an earring or necklace from your collection and choose face
+          fitting. Look at the camera in soft, even light. Keep your ears
+          visible for earrings.
         </p>
         <p>
           The preview helps you explore the design. It does not measure your
-          ring size.
+          physical size.
         </p>
         <Link className="btn gold" href="/admin">
           Open your studio →

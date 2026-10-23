@@ -9,3 +9,7 @@ __pycache__/
 .venv/
 *.db
 .DS_Store
+
+# Reproducible self-hosted 8th Wall artifacts (npm prebuild/predev)
+frontend/public/vendor/8thwall/
+frontend/public/vendor/three/

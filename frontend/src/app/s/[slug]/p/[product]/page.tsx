@@ -23,7 +23,7 @@ export default async function Detail({params}:{params:Promise<{slug:string;produ
     <p className="luxe-detail-description">{p.description||"A rare expression of modern elegance. Crafted to be admired, explored and remembered."}</p>
     <div className="luxe-detail-facts"><div><span>MATERIAL</span><strong>{p.metal||"Upon request"}</strong></div><div><span>WEIGHT</span><strong>{p.weight_grams===null?"Upon request":p.weight_grams+" g"}</strong></div><div><span>SIZE</span><strong>{p.size_label||"Upon request"}</strong></div><div><span>PIECE REFERENCE</span><strong>{p.slug.toUpperCase()}</strong></div></div>
     <div className="luxe-detail-buttons">{p.glb_url&&p.ar_enabled&&<Link className="btn gold" href={"/ar/"+p.id}>EXPLORE IN AR ↗</Link>}{store.contact_url&&<a className="btn ghost" href={store.contact_url} rel="noopener noreferrer" target="_blank">REQUEST DETAILS ↗</a>}<ShareButton/></div>
-    <p className="luxe-detail-disclaimer">3D visualization is indicative. Native AR places the object into your surroundings; anatomical virtual try-on is not yet available.</p>
+    <p className="luxe-detail-disclaimer">3D visualization is indicative. Face fitting is available for earrings and approximate necklace previews. Native AR places the object into your surroundings.</p>
    </div>
   </div>
   <div className="luxe-detail-return container"><Link href={"/s/"+store.slug}>← RETURN TO THE COLLECTION</Link></div>

@@ -3,7 +3,7 @@ import {useMemo,useState} from "react";
 import Link from "next/link";
 import type {Product} from "@/lib/api";
 
-const categories=[["all","All pieces"],["ring","Rings"],["bracelet","Bracelets"],["necklace","Necklaces"],["earring","Earrings"]];
+const categories=[["all","All pieces"],["necklace","Necklaces"],["earring","Earrings"]];
 export default function CatalogCollection({products,storeSlug}:{products:Product[];storeSlug:string}){
  const [active,setActive]=useState("all");
  const visible=useMemo(()=>products.filter(p=>active==="all"||p.category===active),[products,active]);

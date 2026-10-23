@@ -4,9 +4,8 @@ Goldar is a multi-tenant jewelry catalog platform with a private admin studio, p
 
 ## Current implementation status
 - Implemented: single-superadmin API login, store/product CRUD, publication control, responsive luxury catalog, 3D viewer, native AR environment placement (compatible iOS Quick Look / Android Scene Viewer), per-product AR routes, QR codes, S3-compatible presigned uploads.
-- Experimental ring fitting: Ring Atelier uses server-posed WiLoR meshes, camera-space attachment and depth occlusion with an independent live camera preview and short-lived pose overlays. Requires a separately configured inference endpoint. Refresh rate depends on server/network latency; real-device accuracy and physical sizing are not validated. See [architecture and validation](docs/RING_ATELIER_ARCHITECTURE.md).
-- **Not yet implemented**: production-validated anatomical tracking and sizing (finger/wrist/neck/ear), real-world scale calibration, occlusion, physics-based dangling jewelry, production payment plans, audit logs, automated asset validation, anti-bruteforce rate limiting, production load/device testing.
-- **Do not market scene placement as body-tracked jewelry try-on.** Android and iOS browsers may differ in native AR launch behavior. Native iOS Quick Look requires a valid USDZ asset and supported Safari/device. Body tracking requires a separate interactive camera renderer and testing on physical devices.
+- Face Atelier: local 8th Wall face/ear tracking for earrings and approximate face-guided necklace previews. No WiLoR endpoint or server inference is used. Model calibration is saved per product. See [setup, model preparation and deployment](docs/FACE_ATELIER.md).
+- Not validated: physical sizing, true neck/shoulder tracking, hair/body occlusion, dangling-earring physics, and production performance on physical iOS/Android devices. Necklaces follow head motion and are visual previews only.
 
 ## Layout
 ```
@@ -32,7 +31,7 @@ For deployment use PostgreSQL, Caddy HTTPS reverse proxy, restricted access, mig
 ## Local frontend
 ```sh
 cd frontend
-npm install
+npm ci
 cp .env.example .env.local
 npm run dev
 ```
@@ -48,4 +47,4 @@ Host only FastAPI, PostgreSQL and Caddy on EC2. Serve media from object storage/
 Replace development secrets, enforce HTTPS and strict CORS, add login throttling, CSRF-safe cookie strategy or short-lived token handling, rotating credentials, database migration tool, storage upload validation, server-side pagination, backup/restore rehearsal, health monitoring, asset ownership checks, and explicit administrator authorization rules. Only trusted operators should have access to admin routes.
 
 ## Next milestone
-Develop dedicated MediaPipe/Three.js body-tracked AR modules by category, with calibrated jewelry anchors, smoothing, proper depth occlusion and handling of device cameras. Test on physical iPhone Safari and Android Chrome; no claim of high-fidelity try-on until validated.
+Validate Face Atelier on physical iPhone Safari and Android Chrome, calibrate merchant earring/necklace assets, and measure browser tracking performance. Neck/shoulder tracking and physical sizing require separate development.

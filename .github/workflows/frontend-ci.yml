@@ -1,7 +1,7 @@
 name: Goldar frontend CI
 on:
   push:
-    branches: [feature/hand-geometry-depth-v2, main]
+    branches: [main]
   pull_request:
     branches: [main]
 jobs:
@@ -15,5 +15,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - run: npm run test:unit -- --maxWorkers=2 --minWorkers=1
       - run: npm run build
