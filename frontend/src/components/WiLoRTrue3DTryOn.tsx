@@ -115,6 +115,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
       replaceTrack(next);
       rejectedUpdates=0;
      }
+     if(!track)return;
      ringPivot.position.copy(track.position);
      ringPivot.quaternion.copy(track.rotation);
      ringPivot.visible=true;
