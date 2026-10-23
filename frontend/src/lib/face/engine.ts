@@ -1,5 +1,5 @@
 import { LobeStabilizer } from "./stabilization";
-import { createLobeOccluder, PIERCING_INSET_MM } from "./ear-occlusion";
+import { LobeSurface } from "./ear-occlusion";
 import { validPoint, attachmentPlan, EarLobeTracking } from "./attachments";
 import { defaultCalibration } from "./config";
 import * as T from "three";
@@ -51,7 +51,7 @@ export class FaceEngine {
   private left = new T.Group();
   private right = new T.Group();
   private lobeFilters = [new LobeStabilizer(), new LobeStabilizer()];
-  private lobeDepth = [new T.Group(), new T.Group()];
+  private lobeSurfaces: LobeSurface[] = [];
   private occluder = new T.Mesh(
     new T.BufferGeometry(),
     new T.MeshBasicMaterial({
@@ -74,6 +74,8 @@ export class FaceEngine {
     private product: Product,
     private status: (s: string) => void,
   ) {
+    if (product.category === "earring")
+      this.lobeSurfaces = [new LobeSurface(), new LobeSurface()];
     this.root.name = "GoldarFaceJewelry";
     this.left.name = "GoldarLeftJewelry";
     this.right.name = "GoldarRightJewelry";
@@ -116,8 +118,7 @@ export class FaceEngine {
     if (this.product.category === "earring")
       this.right.add(prepareJewelry(clone(gltf.scene), this.calibration));
     if (this.product.category === "earring") {
-      this.lobeDepth.forEach((group) => {
-        group.add(createLobeOccluder());
+      this.lobeSurfaces.forEach(({ group }) => {
         group.visible = false;
         this.root.add(group);
       });
@@ -246,8 +247,10 @@ export class FaceEngine {
       t.scale <= 0
     )
       return;
-    if (this.faceId !== face.id)
+    if (this.faceId !== face.id) {
       this.lobeFilters.forEach((filter) => filter.reset());
+      this.lobeSurfaces.forEach((surface) => surface.reset());
+    }
     this.faceId = face.id;
     this.lastSeen = performance.now();
     this.root.position.set(t.position.x, t.position.y, t.position.z);
@@ -258,6 +261,7 @@ export class FaceEngine {
     const offset = new T.Vector3(...this.calibration.offset_mm).multiplyScalar(
       width / 160,
     );
+    const tracked = this.ears.apply(face);
     const place = (
       group: T.Group,
       point: { x: number; y: number; z: number } | undefined,
@@ -266,23 +270,48 @@ export class FaceEngine {
     ) => {
       group.visible = visible && validPoint(point);
       if (earIndex !== undefined) {
-        const depth = this.lobeDepth[earIndex];
-        depth.visible = group.visible;
-        if (!group.visible) {
-          this.lobeFilters[earIndex].reset();
-          return;
-        }
-        const mm = new T.Vector3(point!.x, point!.y, point!.z).multiplyScalar(
-          160 / width,
+        const surface = this.lobeSurfaces[earIndex];
+        const depth = surface.group;
+        const mm = validPoint(point)
+          ? new T.Vector3(point.x, point.y, point.z).multiplyScalar(160 / width)
+          : undefined;
+        const stable =
+          mm && visible
+            ? this.lobeFilters[earIndex].update(mm, this.lastSeen)
+            : this.lobeFilters[earIndex].hold(this.lastSeen);
+        group.visible = depth.visible = !!stable;
+        if (!stable) return;
+        const side = earIndex === 0 ? "left" : "right";
+        const landmark = (name: "Canal" | "Helix") => {
+          const flag = `${side}${name}Found` as
+            | "leftCanalFound"
+            | "rightCanalFound"
+            | "leftHelixFound"
+            | "rightHelixFound";
+          const position =
+            tracked.attachmentPoints?.[`${side}${name}`]?.position;
+          return tracked[flag] && validPoint(position)
+            ? new T.Vector3(position.x, position.y, position.z).multiplyScalar(
+                160 / width,
+              )
+            : undefined;
+        };
+        const insertion = surface.update(
+          stable,
+          landmark("Canal"),
+          landmark("Helix"),
+          this.lastSeen,
         );
-        const stable = this.lobeFilters[earIndex].update(mm, this.lastSeen);
-        const local = stable.multiplyScalar(width / 160);
-        // Tissue is fixed to the tracked lobe; preview/model calibration must
-        // never move or resize the ear mask itself.
+        const local = stable.clone().multiplyScalar(width / 160);
+        // Tissue and piercing share one stabilized anatomical frame. Merchant
+        // model calibration and preview fit never move or resize the tissue.
         depth.position.copy(local);
         depth.scale.setScalar(width / 160);
-        group.position.copy(local).add(offset);
-        group.position.y += (PIERCING_INSET_MM * width) / 160;
+        group.position
+          .copy(stable)
+          .add(insertion)
+          .multiplyScalar(width / 160)
+          .add(offset);
       } else {
         if (!group.visible) return;
         group.position.set(point!.x, point!.y, point!.z).add(offset);
@@ -290,7 +319,7 @@ export class FaceEngine {
       group.scale.setScalar(width * this.fit);
     };
     const plan = attachmentPlan(
-      this.ears.apply(face),
+      tracked,
       this.product.category,
       this.calibration.side,
       this.calibration.ear_anchor,
@@ -315,18 +344,25 @@ export class FaceEngine {
     }
     const vertices = face.vertices;
     if (vertices.every(validPoint) && this.occluder.geometry.index) {
-      const positions = new Float32Array(
-        vertices.flatMap((p) => [p.x, p.y, p.z]),
-      );
-      const previous = this.occluder.geometry.getAttribute("position");
-      if (previous?.count === vertices.length) {
-        (previous.array as Float32Array).set(positions);
-        previous.needsUpdate = true;
-      } else
-        this.occluder.geometry.setAttribute(
-          "position",
-          new T.BufferAttribute(positions, 3),
+      let attribute = this.occluder.geometry.getAttribute("position") as
+        T.BufferAttribute | undefined;
+      if (!attribute || attribute.count !== vertices.length) {
+        attribute = new T.BufferAttribute(
+          new Float32Array(vertices.length * 3),
+          3,
         );
+        attribute.setUsage(T.DynamicDrawUsage);
+        this.occluder.geometry.setAttribute("position", attribute);
+      }
+      // Reuse the mesh buffer: per-frame flatMap/typed-array allocations cause
+      // garbage-collection pauses on mobile during tracking.
+      const positions = attribute.array as Float32Array;
+      for (let i = 0; i < vertices.length; i++) {
+        positions[i * 3] = vertices[i].x;
+        positions[i * 3 + 1] = vertices[i].y;
+        positions[i * 3 + 2] = vertices[i].z;
+      }
+      attribute.needsUpdate = true;
       this.occluder.visible = true;
     } else this.occluder.visible = false;
     this.root.visible = true;

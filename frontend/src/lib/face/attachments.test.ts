@@ -97,10 +97,11 @@ describe("queued SDK ear visibility events", () => {
     tracking.clear(1);
     expect(tracking.apply(payload).leftLobeFound).toBe(false);
   });
-  it("honours explicit per-frame flags and ignores other ear points", () => {
+  it("honours per-frame flags and tracks surface landmarks independently", () => {
     const tracking = new EarLobeTracking();
     tracking.setPoint(1, "leftHelix", true);
     expect(tracking.apply(payload).leftLobeFound).toBe(false);
+    expect(tracking.apply(payload).leftHelixFound).toBe(true);
     tracking.setPoint(1, "leftLobe", true);
     expect(
       tracking.apply({ ...payload, leftLobeFound: false }).leftLobeFound,

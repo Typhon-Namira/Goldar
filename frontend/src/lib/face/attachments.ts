@@ -38,13 +38,33 @@ export function attachmentPlan(
 export class EarLobeTracking {
   private faces = new Map<
     number,
-    { leftLobeFound?: boolean; rightLobeFound?: boolean }
+    Partial<
+      Record<
+        | "leftLobeFound"
+        | "rightLobeFound"
+        | "leftCanalFound"
+        | "rightCanalFound"
+        | "leftHelixFound"
+        | "rightHelixFound",
+        boolean
+      >
+    >
   >();
 
   setPoint(id: number, point: string, found: boolean) {
-    if (point !== "leftLobe" && point !== "rightLobe") return;
+    if (
+      ![
+        "leftLobe",
+        "rightLobe",
+        "leftCanal",
+        "rightCanal",
+        "leftHelix",
+        "rightHelix",
+      ].includes(point)
+    )
+      return;
     const state = this.faces.get(id) ?? {};
-    state[point === "leftLobe" ? "leftLobeFound" : "rightLobeFound"] = found;
+    state[`${point}Found` as keyof typeof state] = found;
     this.faces.set(id, state);
   }
 
@@ -52,6 +72,10 @@ export class EarLobeTracking {
     const state = this.faces.get(face.id);
     return {
       ...face,
+      leftCanalFound: face.leftCanalFound ?? state?.leftCanalFound ?? false,
+      rightCanalFound: face.rightCanalFound ?? state?.rightCanalFound ?? false,
+      leftHelixFound: face.leftHelixFound ?? state?.leftHelixFound ?? false,
+      rightHelixFound: face.rightHelixFound ?? state?.rightHelixFound ?? false,
       leftLobeFound: face.leftLobeFound ?? state?.leftLobeFound ?? false,
       rightLobeFound: face.rightLobeFound ?? state?.rightLobeFound ?? false,
     };

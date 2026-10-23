@@ -12,6 +12,10 @@ export type FaceData = {
   attachmentPoints: Record<string, { position: Point }>;
   leftLobeFound?: boolean;
   rightLobeFound?: boolean;
+  leftCanalFound?: boolean;
+  rightCanalFound?: boolean;
+  leftHelixFound?: boolean;
+  rightHelixFound?: boolean;
   leftEarFound?: boolean;
   rightEarFound?: boolean;
 };
