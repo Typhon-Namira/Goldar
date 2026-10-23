@@ -38,6 +38,13 @@ they are not a representation of a merchant's actual jewelry.
   Lobe visibility comes from XR8 earpointfound/earpointlost events because
   the SDK removes lobe-found flags from queued face event payloads.
   Move hair aside for better tracking. Hair occlusion is not implemented.
+  A time-based adaptive filter stabilizes each lobe in face-local millimetres,
+  leaving head pose responsive. Filters reset on visibility loss or long gaps.
+  Earrings are inserted 3mm above the detected bottom of the lobe. Small
+  depth-only ellipsoids approximate lobe tissue and hide intersecting parts
+  of the model. These are not an ear segmentation or a scanned ear surface.
+  Product XYZ offsets and model anchors still tune the piercing for each asset;
+  preview scaling changes jewelry size without changing the tissue mask.
 - Necklace: the complete upright necklace, facing the camera in the XY plane.
   It is attached below the chin using the saved offset. It follows head motion:
   this is NOT shoulder tracking or a physical fit simulation.
@@ -86,7 +93,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 15 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 19 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission

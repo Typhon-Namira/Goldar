@@ -1,3 +1,5 @@
+import { LobeStabilizer } from "./stabilization";
+import { createLobeOccluder, PIERCING_INSET_MM } from "./ear-occlusion";
 import { validPoint, attachmentPlan, EarLobeTracking } from "./attachments";
 import { defaultCalibration } from "./config";
 import * as T from "three";
@@ -48,6 +50,8 @@ export class FaceEngine {
   private root = new T.Group();
   private left = new T.Group();
   private right = new T.Group();
+  private lobeFilters = [new LobeStabilizer(), new LobeStabilizer()];
+  private lobeDepth = [new T.Group(), new T.Group()];
   private occluder = new T.Mesh(
     new T.BufferGeometry(),
     new T.MeshBasicMaterial({
@@ -111,6 +115,13 @@ export class FaceEngine {
     this.left.add(prepareJewelry(clone(gltf.scene), this.calibration));
     if (this.product.category === "earring")
       this.right.add(prepareJewelry(clone(gltf.scene), this.calibration));
+    if (this.product.category === "earring") {
+      this.lobeDepth.forEach((group) => {
+        group.add(createLobeOccluder());
+        group.visible = false;
+        this.root.add(group);
+      });
+    }
     this.root.add(this.left, this.right, this.occluder);
     this.root.visible = false;
     this.occluder.renderOrder = -20;
@@ -235,6 +246,8 @@ export class FaceEngine {
       t.scale <= 0
     )
       return;
+    if (this.faceId !== face.id)
+      this.lobeFilters.forEach((filter) => filter.reset());
     this.faceId = face.id;
     this.lastSeen = performance.now();
     this.root.position.set(t.position.x, t.position.y, t.position.z);
@@ -249,10 +262,31 @@ export class FaceEngine {
       group: T.Group,
       point: { x: number; y: number; z: number } | undefined,
       visible: boolean,
+      earIndex?: number,
     ) => {
       group.visible = visible && validPoint(point);
-      if (!group.visible) return;
-      group.position.set(point!.x, point!.y, point!.z).add(offset);
+      if (earIndex !== undefined) {
+        const depth = this.lobeDepth[earIndex];
+        depth.visible = group.visible;
+        if (!group.visible) {
+          this.lobeFilters[earIndex].reset();
+          return;
+        }
+        const mm = new T.Vector3(point!.x, point!.y, point!.z).multiplyScalar(
+          160 / width,
+        );
+        const stable = this.lobeFilters[earIndex].update(mm, this.lastSeen);
+        const local = stable.multiplyScalar(width / 160);
+        // Tissue is fixed to the tracked lobe; preview/model calibration must
+        // never move or resize the ear mask itself.
+        depth.position.copy(local);
+        depth.scale.setScalar(width / 160);
+        group.position.copy(local).add(offset);
+        group.position.y += (PIERCING_INSET_MM * width) / 160;
+      } else {
+        if (!group.visible) return;
+        group.position.set(point!.x, point!.y, point!.z).add(offset);
+      }
       group.scale.setScalar(width * this.fit);
     };
     const plan = attachmentPlan(
@@ -263,8 +297,8 @@ export class FaceEngine {
     );
     if (this.product.category === "earring") {
       // Attach only to a detected lobe, never to the face-mesh ear landmark.
-      place(this.left, plan.left, !!plan.left);
-      place(this.right, plan.right, !!plan.right);
+      place(this.left, plan.left, !!plan.left, 0);
+      place(this.right, plan.right, !!plan.right, 1);
       this.status(
         this.left.visible || this.right.visible
           ? "Earring preview · tracked earlobe"
