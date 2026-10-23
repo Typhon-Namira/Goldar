@@ -8,7 +8,7 @@ been removed. Historical experiments and math tests do not run in this path.
 
 1. `session.ts` owns camera permission, a single in-flight request, capture
    timestamps, cancellation, timeout, teardown and retry. No camera starts on
-   page load. The request uploads an uncropped 640px-wide JPEG to
+   page load. The request uploads an uncropped 480px-wide JPEG to
    `NEXT_PUBLIC_WILOR_API_URL/v1/hand-pose` with `include_mesh=true`.
 2. `protocol.ts` validates topology, finite coordinates, depth, confidence,
    units and intrinsics. It lifts 21 normalized image landmarks to metric
@@ -29,15 +29,24 @@ been removed. Historical experiments and math tests do not run in this path.
 
 ## Temporal contract and current limits
 
-Remote inference cannot provide unseen current hand geometry. The compositor
-therefore presents each accepted pose with its exact input image. It never
-puts an old ring pose over newer live video and never filters the ring separately
-from the occluding hand. This intentionally trades refresh rate for alignment;
-**this is not 60fps live tracking**. A 60fps requestAnimationFrame render loop
-does not change the server inference rate. For continuous StyleAR-class motion,
-a measured low-latency on-device pose estimator or a separately validated local
-tracking layer is still needed. Do not label this implementation equivalent to
-StyleAR or calibrated ring sizing without physical-device evidence.
+The browser displays its native camera video directly, independent of inference,
+model loading and WebGL. A transparent WebGL canvas contains only the ring and
+depth occluder. Server responses never supply or replace the preview image.
+This prevents slow or stalled inference from freezing the camera or hiding hands.
+
+Poses older than 350ms from **capture time** are not rendered on the live video.
+An existing overlay expires independently while the next request is pending.
+Camera playback continues during timeouts, invalid payloads and failed requests.
+The renderer redraws on geometry/visibility/viewport changes rather than uploading
+camera images to a GPU texture at display refresh rate. Export composites the
+current video and overlay with identical cover crop and optional mirroring.
+
+Remote inference still cannot provide unseen current hand geometry. A fresh
+remote pose can lag the live hand by up to the age limit. For continuous
+StyleAR-class motion, a measured low-latency on-device pose estimator or a
+separately validated local tracking layer is still needed. Do not label this
+implementation equivalent to StyleAR or calibrated ring sizing without
+physical-device evidence.
 
 All focal lengths from the repository WiLoR model are estimates, not measured
 browser camera calibration. Cross-section diameter is a visual fit estimate.
@@ -68,11 +77,13 @@ from `frontend`. Tests cover invalid payloads, capture ordering, latency,
 hand identity, handedness, cross-section fitting and portrait/off-centre
 projection. Existing geometry tests are retained.
 
-Current validation: 25 unit tests and the production build pass. Chromium with a synthetic camera,
+Current validation: 30 unit tests and the production build pass. Chromium with a synthetic camera,
 synthetic GLTF ring and intercepted inference responses verifies camera start,
 mesh presentation, finger switching, photo capture, camera release and restart.
 A pixel assertion verifies the captured camera image survives compositing and
-PNG export. These are lifecycle/rendering tests, not real-hand accuracy tests.
+PNG export. Slow-response regression tests verify camera independence and
+expiration of old overlays. These are lifecycle/rendering tests, not real-hand
+accuracy tests.
 
 Before production: test real left/right hands and front/rear cameras on iOS
 Safari and Android Chrome, portrait/landscape crops, side views and palm turns,

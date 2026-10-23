@@ -19,23 +19,22 @@ export class RingRenderer {
       side: T.DoubleSide,
     }),
   );
-  private image = document.createElement("canvas");
-  private texture = new T.CanvasTexture(this.image);
   private environment: T.WebGLRenderTarget;
   private inner = 1;
   private disposed = false;
   private current: Intrinsics | null = null;
+  private dirty = true;
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new T.WebGLRenderer({
       canvas,
       antialias: true,
       preserveDrawingBuffer: true,
-      alpha: false,
+      alpha: true,
       powerPreference: "high-performance",
     });
     this.camera.near = 0.005;
     this.camera.far = 20;
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
     this.renderer.outputColorSpace = T.SRGBColorSpace;
     this.renderer.toneMapping = T.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
@@ -45,8 +44,7 @@ export class RingRenderer {
     room.dispose();
     pmrem.dispose();
     this.scene.environment = this.environment.texture;
-    this.texture.colorSpace = T.SRGBColorSpace;
-    this.scene.background = this.texture;
+    this.renderer.setClearColor(0x000000, 0);
     this.scene.add(new T.HemisphereLight(0xffffff, 0x423831, 1.2));
     const key = new T.DirectionalLight(0xffefd9, 2.5);
     key.position.set(-1, 2, 2);
@@ -80,25 +78,13 @@ export class RingRenderer {
     // Preserve authored PBR metal, roughness, gemstone/transmission materials.
     this.pivot.add(attachCalibratedRing(gltf.scene, calibration));
   }
-  present(frame: HTMLCanvasElement, solved: SolvedHand | null, fit: number) {
+  present(solved: SolvedHand | null, fit: number) {
     if (this.disposed) return;
-    if (
-      this.image.width !== frame.width ||
-      this.image.height !== frame.height
-    ) {
-      this.image.width = frame.width;
-      this.image.height = frame.height;
-      this.texture.dispose();
-      this.texture = new T.CanvasTexture(this.image);
-      this.texture.colorSpace = T.SRGBColorSpace;
-      this.scene.background = this.texture;
-    }
-    this.image.getContext("2d")!.drawImage(frame, 0, 0);
-    this.texture.needsUpdate = true;
     if (!solved) {
       this.hide();
       return;
     }
+    this.dirty = true;
     this.current = solved.hand.camera;
     const geometry = this.depth.geometry;
     const vertices = new Float32Array(
@@ -119,6 +105,7 @@ export class RingRenderer {
     this.depth.visible = true;
   }
   hide() {
+    this.dirty = true;
     this.pivot.visible = false;
     this.depth.visible = false;
   }
@@ -129,18 +116,14 @@ export class RingRenderer {
     if (!w || !h) return;
     const dpr = this.renderer.getPixelRatio();
     if (
-      this.canvas.width !== Math.round(w * dpr) ||
-      this.canvas.height !== Math.round(h * dpr)
-    )
+      this.canvas.width !== Math.floor(w * dpr) ||
+      this.canvas.height !== Math.floor(h * dpr)
+    ) {
       this.renderer.setSize(w, h, false);
-    const iw = this.image.width,
-      ih = this.image.height,
-      cover = Math.max(w / iw, h / ih);
-    this.texture.repeat.set(w / (iw * cover), h / (ih * cover));
-    this.texture.offset.set(
-      (1 - this.texture.repeat.x) / 2,
-      (1 - this.texture.repeat.y) / 2,
-    );
+      this.dirty = true;
+    }
+    if (!this.dirty) return;
+    this.dirty = false;
     if (this.current) {
       this.camera.projectionMatrix.copy(coverProjection(this.current, w, h));
       this.camera.projectionMatrixInverse
@@ -149,8 +132,30 @@ export class RingRenderer {
     }
     this.renderer.render(this.scene, this.camera);
   }
-  snapshot() {
-    return this.canvas.toDataURL("image/png");
+  snapshot(video: HTMLVideoElement, mirrored: boolean) {
+    // Video is composited by the browser during preview, and explicitly here
+    // for export. Use the same cover crop and mirror for both layers.
+    this.dirty = true;
+    this.render();
+    const output = document.createElement("canvas");
+    output.width = this.canvas.width;
+    output.height = this.canvas.height;
+    const ctx = output.getContext("2d");
+    if (!ctx || !video.videoWidth || !video.videoHeight)
+      throw Error("Camera frame is not ready");
+    if (mirrored) {
+      ctx.translate(output.width, 0);
+      ctx.scale(-1, 1);
+    }
+    const scale = Math.max(
+      output.width / video.videoWidth,
+      output.height / video.videoHeight,
+    );
+    const w = video.videoWidth * scale,
+      h = video.videoHeight * scale;
+    ctx.drawImage(video, (output.width - w) / 2, (output.height - h) / 2, w, h);
+    ctx.drawImage(this.canvas, 0, 0);
+    return output.toDataURL("image/png");
   }
   private release(root: T.Object3D) {
     const textures = new Set<T.Texture>(),
@@ -176,7 +181,6 @@ export class RingRenderer {
     if (this.disposed) return;
     this.disposed = true;
     this.release(this.scene);
-    this.texture.dispose();
     this.environment.dispose();
     this.renderer.dispose();
   }

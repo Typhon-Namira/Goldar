@@ -89,7 +89,9 @@ export default function RingAtelier({ product }: { product: Product }) {
           autoPlay
           playsInline
           muted
-          className="atelier-capture"
+          className={
+            "atelier-capture " + (facing === "user" ? "is-mirrored" : "")
+          }
           aria-hidden="true"
         />
         <canvas

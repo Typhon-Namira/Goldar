@@ -2,6 +2,7 @@ import type { Product } from "../api";
 import { decodeObservation, type Finger } from "./protocol";
 import { HandSolver } from "./tracking";
 import { RingRenderer } from "./renderer";
+import { isLivePose } from "./timing";
 export type SessionState = {
   phase: "loading" | "searching" | "tracking" | "error";
   message: string;
@@ -22,6 +23,9 @@ export class RingSession {
   private finger: Finger = "ring";
   private fit = 1;
   private lastGood = 0;
+  private poseCapture = -Infinity;
+  private poseVisible = false;
+  private facing: "user" | "environment" = "environment";
   constructor(
     private video: HTMLVideoElement,
     private canvas: HTMLCanvasElement,
@@ -29,11 +33,20 @@ export class RingSession {
     private notify: (s: SessionState) => void,
   ) {}
   configure(finger: Finger, fit: number) {
-    if (this.finger !== finger) this.solver.reset();
+    if (this.finger !== finger) {
+      this.solver.reset();
+      this.clearPose();
+    }
     this.finger = finger;
     this.fit = fit;
   }
+  private clearPose() {
+    this.poseVisible = false;
+    this.renderer?.hide();
+    this.renderer?.render();
+  }
   async start(product: Product, facing: "user" | "environment") {
+    this.facing = facing;
     if (!this.endpoint)
       throw Error("Virtual fitting service is not configured.");
     if (!navigator.mediaDevices?.getUserMedia)
@@ -44,6 +57,7 @@ export class RingSession {
         facingMode: { ideal: facing },
         width: { ideal: 1280 },
         height: { ideal: 960 },
+        frameRate: { ideal: 30, max: 30 },
       },
       audio: false,
     });
@@ -60,6 +74,20 @@ export class RingSession {
     if (this.disposed) return;
     const loop = () => {
       if (this.disposed) return;
+      // The native <video> runs independently of inference and WebGL. Clear
+      // expired overlays even if the next fetch never resolves.
+      if (
+        this.poseVisible &&
+        !isLivePose(this.poseCapture, performance.now())
+      ) {
+        this.clearPose();
+        this.notify({
+          phase: "searching",
+          message: "Camera is live. Waiting for a fresh hand position…",
+        });
+      }
+      // Projection also follows viewport changes; render is inexpensive while
+      // hidden (no hand/jewelry draw calls and no video texture uploads).
       this.renderer?.render();
       this.raf = requestAnimationFrame(loop);
     };
@@ -77,10 +105,10 @@ export class RingSession {
       this.timer = setTimeout(() => void this.capture(), 100);
       return;
     }
-    this.frame.width = 640;
-    this.frame.height = Math.round(
-      (640 * video.videoHeight) / video.videoWidth,
-    );
+    const width = 480,
+      height = Math.round((width * video.videoHeight) / video.videoWidth);
+    if (this.frame.width !== width) this.frame.width = width;
+    if (this.frame.height !== height) this.frame.height = height;
     this.frame
       .getContext("2d")!
       .drawImage(video, 0, 0, this.frame.width, this.frame.height);
@@ -92,7 +120,7 @@ export class RingSession {
     const timer = setTimeout(cancel, 8000);
     try {
       const blob = await new Promise<Blob | null>((resolve) =>
-        this.frame.toBlob(resolve, "image/jpeg", 0.86),
+        this.frame.toBlob(resolve, "image/jpeg", 0.78),
       );
       if (!blob || this.disposed) return;
       const body = new FormData();
@@ -122,11 +150,14 @@ export class RingSession {
       if (this.disposed) return;
       // A response for the previous finger must never attach to the new selection.
       const solved =
-        finger === this.finger
+        finger === this.finger && isLivePose(captured, performance.now())
           ? this.solver.solve(observation, finger, this.anchor)
           : null;
-      // Present the exact captured frame, never an old pose over a newer live video.
-      this.renderer?.present(this.frame, solved, this.fit);
+      // Only geometry is updated here. This request never controls the camera.
+      this.renderer?.present(solved, this.fit);
+      this.poseVisible = !!solved;
+      this.poseCapture = solved ? captured : -Infinity;
+      this.renderer?.render();
       if (solved) {
         this.lastGood = performance.now();
         this.notify({
@@ -141,21 +172,20 @@ export class RingSession {
         if (performance.now() - this.lastGood > 1500) this.solver.reset();
         this.notify({
           phase: "searching",
-          message:
-            observation.receivedAt - captured > 1200
-              ? "Connection is too slow for reliable fitting."
-              : "Show your whole hand in soft, even light.",
+          message: !isLivePose(captured, observation.receivedAt)
+            ? "Camera is live. Hand processing is taking too long; keep your hand still."
+            : "Show your whole hand in soft, even light.",
         });
       }
     } catch (e) {
       if (!this.disposed) {
-        this.renderer?.hide();
+        this.clearPose();
         this.notify({
           phase: "error",
           message:
             e instanceof Error
               ? e.message
-              : "Unable to reach the fitting service.",
+              : "Unable to reach the fitting service. Camera is still live.",
         });
       }
     } finally {
@@ -168,7 +198,7 @@ export class RingSession {
   anchor = 0.22;
   snapshot() {
     this.renderer?.render();
-    return this.renderer?.snapshot();
+    return this.renderer?.snapshot(this.video, this.facing === "user");
   }
   dispose() {
     this.disposed = true;
