@@ -90,7 +90,7 @@ export class GoldarSpatialEngine{
    o.mesh.faces.every(f=>f.length===3&&f.every(i=>Number.isInteger(i)&&i>=0&&i<778));
  }
  update(o:SpatialObservation):boolean{
-  if(!this.acceptable(o)||o.capturedAt<=this.lastCapture||
+  if(!this.acceptable(o)||(this.initialized&&o.capturedAt<=this.lastCapture)||
    o.side!==this.side)return false;
   const c=o.mesh.camera;
   if(Math.abs(c.fx/this.camera.fx-1)>.2||
