@@ -2,7 +2,7 @@ import type { Product } from "../api";
 import { decodeObservation, type Finger } from "./protocol";
 import { HandSolver } from "./tracking";
 import { RingRenderer } from "./renderer";
-import { isLivePose } from "./timing";
+import { isLivePose, isUsableObservation, canPresentPose } from "./timing";
 export type SessionState = {
   phase: "loading" | "searching" | "tracking" | "error";
   message: string;
@@ -24,6 +24,7 @@ export class RingSession {
   private fit = 1;
   private lastGood = 0;
   private poseCapture = -Infinity;
+  private poseReceived = -Infinity;
   private poseVisible = false;
   private facing: "user" | "environment" = "environment";
   constructor(
@@ -78,7 +79,7 @@ export class RingSession {
       // expired overlays even if the next fetch never resolves.
       if (
         this.poseVisible &&
-        !isLivePose(this.poseCapture, performance.now())
+        !canPresentPose(this.poseCapture, this.poseReceived, performance.now())
       ) {
         this.clearPose();
         this.notify({
@@ -150,19 +151,25 @@ export class RingSession {
       if (this.disposed) return;
       // A response for the previous finger must never attach to the new selection.
       const solved =
-        finger === this.finger && isLivePose(captured, performance.now())
+        finger === this.finger &&
+        isUsableObservation(captured, observation.receivedAt)
           ? this.solver.solve(observation, finger, this.anchor)
           : null;
       // Only geometry is updated here. This request never controls the camera.
       this.renderer?.present(solved, this.fit);
       this.poseVisible = !!solved;
       this.poseCapture = solved ? captured : -Infinity;
+      this.poseReceived = solved ? observation.receivedAt : -Infinity;
       this.renderer?.render();
       if (solved) {
         this.lastGood = performance.now();
         this.notify({
           phase: "tracking",
-          message: "Your ring, in perspective.",
+          message: !isLivePose(captured, observation.receivedAt)
+            ? "Preview updated. Processing is delayed; keep your hand still."
+            : !solved.occlusionReliable
+              ? "Ring preview · estimated fit"
+              : "Your ring, in perspective.",
           latency: observation.receivedAt - captured,
           inferenceMs: observation.inferenceMs,
           confidence: solved.hand.confidence,
@@ -174,7 +181,9 @@ export class RingSession {
           phase: "searching",
           message: !isLivePose(captured, observation.receivedAt)
             ? "Camera is live. Hand processing is taking too long; keep your hand still."
-            : "Show your whole hand in soft, even light.",
+            : observation.hands.length
+              ? "Hand detected. Keep the selected finger visible and relaxed."
+              : "No hand detected. Show your whole hand in soft, even light.",
         });
       }
     } catch (e) {

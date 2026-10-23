@@ -62,7 +62,7 @@ describe("inference boundary", () => {
   });
   it("accepts empty detections", () =>
     expect(decodeObservation({ hands: [] }, 1, 2).hands).toEqual([]));
-  it("requires an actual posed mesh", () =>
+  it("rejects a hand without usable joints and camera geometry", () =>
     expect(() =>
       decodeObservation({ hands: [{ side: "Right" }] }, 1, 2),
     ).toThrow());
@@ -77,7 +77,7 @@ describe("anatomical attachment", () => {
     expect(s!.position.z).toBe(-0.5);
     expect(solver.solve(o, "ring")).toBeNull();
     expect(
-      solver.solve({ ...o, capturedAt: 200, receivedAt: 1600 }, "ring"),
+      solver.solve({ ...o, capturedAt: 200, receivedAt: 8300 }, "ring"),
     ).toBeNull();
   });
   it("locks handedness until reset", () => {
@@ -137,11 +137,44 @@ describe("server consistency", () => {
     expect(() =>
       decodeObservation({ ...payload(), imageWidth: 1280 }, 1, 2),
     ).toThrow());
-  it("rejects native reconstruction diagnostics that report a mismatch", () => {
+  it("does not veto native geometry because optional LBS diagnostics failed", () => {
     const raw = payload();
     Object.assign(raw.hands[0], {
       lbsDiagnostics: { available: true, passesOneMillimeterNative: false },
     });
-    expect(() => decodeObservation(raw, 1, 2)).toThrow();
+    expect(decodeObservation(raw, 1, 2).hands).toHaveLength(1);
+  });
+});
+
+describe("older inference compatibility", () => {
+  it("places a ring from joints and intrinsics when no mesh is returned", () => {
+    const raw = payload();
+    const { mesh, ...hand } = raw.hands[0];
+    const o = decodeObservation(
+      {
+        hands: [{ ...hand, focalLengthPx: 500 }],
+        imageWidth: 640,
+        imageHeight: 480,
+      },
+      0,
+      2500,
+    );
+    const solved = new HandSolver().solve(o, "ring");
+    expect(solved).not.toBeNull();
+    expect(solved!.diameter).toBeGreaterThan(0.01);
+    expect(solved!.occlusionReliable).toBe(false);
+    expect(solved!.hand.vertices).toHaveLength(0);
+  });
+  it("does not discard a valid hand because a sparse mesh misses the narrow finger slice", () => {
+    const raw = payload();
+    raw.hands[0].mesh.vertices = Array.from({ length: 778 }, () => [
+      0.1, 0.1, 0.5,
+    ]);
+    const solved = new HandSolver().solve(
+      decodeObservation(raw, 10, 50),
+      "ring",
+    );
+    expect(solved).not.toBeNull();
+    expect(solved!.occlusionReliable).toBe(false);
   });
 });

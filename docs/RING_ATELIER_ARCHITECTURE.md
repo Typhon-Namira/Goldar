@@ -11,15 +11,20 @@ been removed. Historical experiments and math tests do not run in this path.
    page load. The request uploads an uncropped 480px-wide JPEG to
    `NEXT_PUBLIC_WILOR_API_URL/v1/hand-pose` with `include_mesh=true`.
 2. `protocol.ts` validates topology, finite coordinates, depth, confidence,
-   units and intrinsics. It lifts 21 normalized image landmarks to metric
+   units and intrinsics. Older joints-only responses use top-level image size
+   and focal length without fabricating an occlusion surface. It lifts 21 normalized image landmarks to metric
    camera space. Optional world landmarks plus translation, image dimensions,
-   focal length, MANO metadata and LBS diagnostics are consistency checks.
+   focal length are consistency checks. Optional MANO/LBS diagnostic results
+   do not veto the independently returned native posed surface.
    Pose and shape are already applied to native vertices; never apply them twice.
    Licensed canonical MANO buffers are unnecessary and are not requested.
 3. `tracking.ts` locks hand identity, solves the selected proximal finger frame,
    corrects handedness, estimates the local mesh cross section excluding nearby
-   fingers, and applies the product's anchor fraction. Frames older than 1200ms
-   or received out of capture order are rejected. Reacquisition clears identity.
+   fingers, and applies the product's anchor fraction. Frames older than 8 seconds
+   or received out of capture order are rejected. If a mesh cross section is too
+   sparse or a service returns joints only, a bounded visual diameter estimate
+   from proximal bone length is used with hand occlusion disabled. This is not
+   a measured ring size. Reacquisition clears identity.
 4. `renderer.ts` uses the same camera for depth-only hand geometry and jewelry,
    product GLB calibration and fit multiplier, original PBR materials, PMREM
    studio reflections, ACES tone mapping and bounded device pixel ratio.
@@ -34,19 +39,22 @@ model loading and WebGL. A transparent WebGL canvas contains only the ring and
 depth occluder. Server responses never supply or replace the preview image.
 This prevents slow or stalled inference from freezing the camera or hiding hands.
 
-Poses older than 350ms from **capture time** are not rendered on the live video.
-An existing overlay expires independently while the next request is pending.
-Camera playback continues during timeouts, invalid payloads and failed requests.
+Remote acceptance and on-screen lifetime use separate clocks. Valid observations
+up to 8 seconds old can be shown for at most 1.8 seconds **after receipt**, then
+hidden if no replacement arrives. The previous 350ms acceptance gate could reject every response when server
+latency exceeded that limit, making fitting look broken.
+The renderer still rejects out-of-order results and never pauses the camera.
+Responses exceeding the live threshold are explicitly labelled delayed; keep
+the hand still for these previews. This fixes visibility, not remote latency.
+
 The renderer redraws on geometry/visibility/viewport changes rather than uploading
 camera images to a GPU texture at display refresh rate. Export composites the
 current video and overlay with identical cover crop and optional mirroring.
 
-Remote inference still cannot provide unseen current hand geometry. A fresh
-remote pose can lag the live hand by up to the age limit. For continuous
-StyleAR-class motion, a measured low-latency on-device pose estimator or a
-separately validated local tracking layer is still needed. Do not label this
-implementation equivalent to StyleAR or calibrated ring sizing without
-physical-device evidence.
+Remote inference still cannot provide unseen current hand geometry. Slow poses
+can lag the live hand. Continuous StyleAR-class motion requires measured
+low-latency inference or a separately validated local tracking layer. Do not
+label this implementation equivalent to StyleAR or calibrated ring sizing.
 
 All focal lengths from the repository WiLoR model are estimates, not measured
 browser camera calibration. Cross-section diameter is a visual fit estimate.
@@ -77,12 +85,13 @@ from `frontend`. Tests cover invalid payloads, capture ordering, latency,
 hand identity, handedness, cross-section fitting and portrait/off-centre
 projection. Existing geometry tests are retained.
 
-Current validation: 30 unit tests and the production build pass. Chromium with a synthetic camera,
+Current validation: 33 unit tests and the production build pass. Chromium with a synthetic camera,
 synthetic GLTF ring and intercepted inference responses verifies camera start,
 mesh presentation, finger switching, photo capture, camera release and restart.
 A pixel assertion verifies the captured camera image survives compositing and
 PNG export. Slow-response regression tests verify camera independence and
-expiration of old overlays. These are lifecycle/rendering tests, not real-hand
+expiration of old overlays. Browser pixel assertions also verify jewelry
+actually renders with 1.5-second responses and with joints-only payloads. These are lifecycle/rendering tests, not real-hand
 accuracy tests.
 
 Before production: test real left/right hands and front/rear cameras on iOS

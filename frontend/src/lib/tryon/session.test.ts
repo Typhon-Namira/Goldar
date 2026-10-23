@@ -15,7 +15,7 @@ vi.mock("./tracking", () => ({
   HandSolver: vi.fn(() => ({ solve, reset: vi.fn() })),
 }));
 import { RingSession } from "./session";
-import { isLivePose, MAX_LIVE_POSE_AGE_MS } from "./timing";
+import { isLivePose, POSE_HOLD_MS, canPresentPose } from "./timing";
 import type { Product } from "../api";
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -35,6 +35,8 @@ describe("live camera independence", () => {
       toFake: ["setTimeout", "clearTimeout", "Date", "performance"],
     });
     vi.clearAllMocks();
+    solve.mockReset();
+    decode.mockReset();
     renderer.load.mockResolvedValue(undefined);
     stop = vi.fn();
     video = {
@@ -91,7 +93,7 @@ describe("live camera independence", () => {
     fetcher.mockReturnValue(new Promise(() => {}));
     await startup;
   });
-  it("keeps camera attached during a slow response and rejects its stale pose", async () => {
+  it("displays a valid slow response without pausing the camera", async () => {
     const request = deferred<Response>();
     fetcher.mockReturnValue(request.promise);
     await session.start(product, "environment");
@@ -105,20 +107,26 @@ describe("live camera independence", () => {
       receivedAt: 3000,
       inferenceMs: 2900,
     });
+    const solved = {
+      capturedAt: 0,
+      occlusionReliable: false,
+      hand: { confidence: 1, camera: { source: "estimated" } },
+    };
+    solve.mockReturnValue(solved);
     request.resolve({
       ok: true,
       json: async () => ({ hands: [] }),
     } as Response);
     await vi.advanceTimersByTimeAsync(1);
-    expect(solve).not.toHaveBeenCalled();
-    expect(renderer.present).toHaveBeenLastCalledWith(null, 1);
+    expect(solve).toHaveBeenCalledOnce();
+    expect(renderer.present).toHaveBeenLastCalledWith(solved, 1);
     expect(notify).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining("Camera is live"),
+        message: expect.stringContaining("Processing is delayed"),
       }),
     );
   });
-  it("expires geometry from capture time while the next request is pending", async () => {
+  it("expires geometry after presentation while the next request is pending", async () => {
     fetcher
       .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
       .mockReturnValue(new Promise(() => {}));
@@ -135,7 +143,7 @@ describe("live camera independence", () => {
     await session.start(product, "environment");
     await vi.advanceTimersByTimeAsync(10);
     expect(renderer.present).toHaveBeenCalledWith(expect.any(Object), 1);
-    await vi.advanceTimersByTimeAsync(MAX_LIVE_POSE_AGE_MS + 30);
+    await vi.advanceTimersByTimeAsync(POSE_HOLD_MS + 30);
     expect(renderer.hide).toHaveBeenCalled();
     expect(video.pause).not.toHaveBeenCalled();
   });
@@ -151,6 +159,11 @@ describe("live camera independence", () => {
   });
 });
 describe("live pose lifetime", () => {
+  it("gives slow valid inference time on screen but never holds it indefinitely", () => {
+    expect(canPresentPose(0, 3000, 3000)).toBe(true);
+    expect(canPresentPose(0, 3000, 4801)).toBe(false);
+    expect(canPresentPose(0, 9000, 9000)).toBe(false);
+  });
   it("bounds pose age using capture time", () => {
     expect(isLivePose(100, 449)).toBe(true);
     expect(isLivePose(100, 451)).toBe(false);

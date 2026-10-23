@@ -1,5 +1,6 @@
 import * as T from "three";
 import type { Finger, Hand, Observation } from "./protocol";
+import { isUsableObservation } from "./timing";
 const bones: Record<Finger, [number, number]> = {
   index: [5, 6],
   middle: [9, 10],
@@ -13,6 +14,7 @@ export type SolvedHand = {
   rotation: T.Quaternion;
   diameter: number;
   capturedAt: number;
+  occlusionReliable: boolean;
 };
 /** Mesh and attachment are solved from the SAME snapshot. Smoothing just the
  * ring while leaving the hand at the new pose creates visible penetration. */
@@ -28,7 +30,10 @@ export class HandSolver {
     finger: Finger,
     anchorFraction = 0.22,
   ): SolvedHand | null {
-    if (o.capturedAt <= this.last || o.receivedAt - o.capturedAt > 1200)
+    if (
+      o.capturedAt <= this.last ||
+      !isUsableObservation(o.capturedAt, o.receivedAt)
+    )
       return null;
     const hand = this.side
       ? o.hands.find((h) => h.side === this.side)
@@ -38,6 +43,7 @@ export class HandSolver {
       [a, b] = bones[finger];
     const axis = p[b].clone().sub(p[a]);
     if (axis.length() < 0.008 || axis.length() > 0.12) return null;
+    const boneLength = axis.length();
     axis.normalize();
     const across = p[5].clone().sub(p[17]);
     across.addScaledVector(axis, -across.dot(axis));
@@ -78,10 +84,13 @@ export class HandSolver {
       if (nearest === finger) radii.push(r);
     }
     radii.sort((a, b) => a - b);
-    // Insufficient mesh support must not silently become a fabricated ring size.
-    if (radii.length < 5) return null;
+    // A sparse cross section must not suppress a valid pose. Fall back to a
+    // bounded visual estimate from the proximal bone, never a measured size.
+    const supported = radii.length >= 3;
     const diameter = T.MathUtils.clamp(
-      radii[Math.floor(radii.length * 0.65)] * 2,
+      supported
+        ? radii[Math.floor(radii.length * 0.65)] * 2 * 1.06
+        : boneLength * 0.5,
       0.01,
       0.03,
     );
@@ -95,6 +104,7 @@ export class HandSolver {
       ),
       diameter,
       capturedAt: o.capturedAt,
+      occlusionReliable: supported && hand.vertices.length > 0,
     };
   }
 }

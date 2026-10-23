@@ -102,7 +102,7 @@ export class RingRenderer {
     this.pivot.quaternion.copy(solved.rotation);
     this.pivot.scale.setScalar((solved.diameter * fit) / this.inner);
     this.pivot.visible = true;
-    this.depth.visible = true;
+    this.depth.visible = solved.occlusionReliable;
   }
   hide() {
     this.dirty = true;
