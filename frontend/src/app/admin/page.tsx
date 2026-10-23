@@ -626,7 +626,7 @@ export default function Admin() {
                       }
                     >
                       <option value="auto">
-                        Automatic (lobe or estimated ear)
+                        Automatic (tracked lobe only)
                       </option>
                       <option value="lobe">
                         Tracked lobe only (hide when lost)

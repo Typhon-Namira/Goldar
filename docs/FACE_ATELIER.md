@@ -33,9 +33,10 @@ procedurally generated GLB in `public/models`. Samples demonstrate the workflow;
 they are not a representation of a merchant's actual jewelry.
 
 - Earring: ONE upright earring per model; the runtime creates a copy for each
-  tracked ear. Choose both, left or right in calibration. Auto mode prefers
-  detected lobes and falls back to the SDK face-ear landmarks, with an estimated
-  attachment label. Lobe-only mode hides jewelry when the precise lobe is lost.
+  tracked ear. Choose both, left or right in calibration. Both auto and lobe-only modes require a detected earlobe and hide jewelry
+  when it is lost. Face-mesh ear landmarks are not used as piercing locations.
+  Lobe visibility comes from XR8 earpointfound/earpointlost events because
+  the SDK removes lobe-found flags from queued face event payloads.
   Move hair aside for better tracking. Hair occlusion is not implemented.
 - Necklace: the complete upright necklace, facing the camera in the XY plane.
   It is attached below the chin using the saved offset. It follows head motion:
@@ -82,9 +83,10 @@ exercise both categories, persisted calibration/public read, and rejection of
 invalid calibration and retired category creation. Browser validation uses the
 REAL local SDK/model files and a photographic camera input, not mocked XR8.
 A detected face, visible necklace scene and stop/restart are checked. Earring
-preview is also exercised using the real engine with estimated ear anchors.
+preview is exercised using the real engine with tracked earlobe anchors,
+including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 12 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 15 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission

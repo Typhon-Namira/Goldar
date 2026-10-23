@@ -1,4 +1,4 @@
-import { validPoint, attachmentPlan } from "./attachments";
+import { validPoint, attachmentPlan, EarLobeTracking } from "./attachments";
 import { defaultCalibration } from "./config";
 import * as T from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -59,6 +59,7 @@ export class FaceEngine {
   private model: T.Object3D | null = null;
   private environment: T.Texture | null = null;
   private faceId: number | null = null;
+  private ears = new EarLobeTracking();
   private lastSeen = 0;
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private fit = 1;
@@ -158,9 +159,17 @@ export class FaceEngine {
           event: "facecontroller.faceupdated",
           process: (e) => this.update(e.detail as FaceData),
         },
+        ...(["earpointfound", "earpointlost"] as const).map((event) => ({
+          event: `facecontroller.${event}`,
+          process: (e: { detail: unknown }) => {
+            const data = e.detail as { id: number; point: string };
+            this.ears.setPoint(data.id, data.point, event === "earpointfound");
+          },
+        })),
         {
           event: "facecontroller.facelost",
           process: (e) => {
+            this.ears.clear((e.detail as { id: number }).id);
             if ((e.detail as { id: number }).id === this.faceId) {
               this.root.visible = false;
               this.faceId = null;
@@ -247,20 +256,18 @@ export class FaceEngine {
       group.scale.setScalar(width * this.fit);
     };
     const plan = attachmentPlan(
-      face,
+      this.ears.apply(face),
       this.product.category,
       this.calibration.side,
       this.calibration.ear_anchor,
     );
     if (this.product.category === "earring") {
-      // Prefer tracked lobes; auto mode can use the SDK face-ear landmarks.
+      // Attach only to a detected lobe, never to the face-mesh ear landmark.
       place(this.left, plan.left, !!plan.left);
       place(this.right, plan.right, !!plan.right);
       this.status(
         this.left.visible || this.right.visible
-          ? plan.estimated
-            ? "Earring preview · estimated ear attachment"
-            : "Earring preview · move slowly"
+          ? "Earring preview · tracked earlobe"
           : "Face found. Reveal your ears by moving hair aside.",
       );
     } else {

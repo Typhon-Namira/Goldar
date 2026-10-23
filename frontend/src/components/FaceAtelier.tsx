@@ -134,7 +134,7 @@ export default function FaceAtelier({ product }: { product: Product }) {
         <p>
           {necklace
             ? "Approximate necklace placement is guided by your chin and follows head motion. It does not track your shoulders or measure neck size."
-            : "Use a model of one earring. Tracked lobes are preferred; automatic placement can use estimated face-ear landmarks. Hair occlusion is approximate. Preview size is approximate."}
+            : "Use a model of one earring. Earrings attach only to detected earlobes and hide when tracking is lost. Hair occlusion is approximate. Preview size is approximate."}
         </p>
         <p>
           Powered by{" "}
