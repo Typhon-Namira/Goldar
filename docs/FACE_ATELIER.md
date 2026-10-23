@@ -4,7 +4,7 @@
 
 `/ar/:id` loads Face Atelier for enabled `earring` and `necklace` products.
 Each camera session uses an isolated same-origin `/face-runtime/:id` iframe.
-Stopping removes that document and its camera, GPU resources and SDK globals.
+Stopping removes that document and its camera, GPU resources, pose worker and SDK globals.
 Restart creates a fresh runtime; it does not reuse the upstream SDK's known
 face-controller singleton after cleanup. No camera runs before Start.
 
@@ -21,7 +21,9 @@ version is `loadChunk`, singular. See the upstream license served locally at
 copy the SDK, chunks and models to ignored `public/vendor/8thwall`. These assets
 must be deployed with the frontend; no third-party camera service or API key is
 needed. Inference uses browser WebAssembly/WebGL. No frames are uploaded by this
-integration, and NEXT_PUBLIC_WILOR_API_URL is no longer read.
+integration, and NEXT_PUBLIC_WILOR_API_URL is no longer read. Necklaces also
+load same-origin MediaPipe WASM plus the checked-in Pose Lite model archive;
+see THIRD_PARTY_FACE_ENGINE.md for Apache licensing and model provenance.
 
 ## Model preparation and dashboard
 
@@ -52,24 +54,44 @@ they are not a representation of a merchant's actual jewelry.
   validation remains necessary. Product XYZ offsets and model anchors tune
   each asset; preview fit changes jewelry size without resizing the tissue.
 - Necklace: a complete volumetric chain, front along +Z and up along +Y,
-  including its rear neck arc. The runtime rotates authored +Z fronts onto
-  XR8 face-local -Z; positive face-local Z is behind the chin.
-  A flat XY ring cannot wrap around a neck.
-  The original sample is now an elliptical 3D loop with a lowered front arc
-  and pendant. Default height is 85mm, with chin-relative offset [0,-10,40]mm.
-  A closed elliptical neck-depth proxy hides chain behind the neck, from
-  either viewing direction. It does not stretch with the preview fit slider.
-  Only the unchanged calibration of the old built-in sample (180mm,
-  [0,-45,10]mm) resolves to the new defaults, in both dashboard and runtime;
-  merchant models and custom saved calibrations are preserved.
-  Placement follows head motion: this is NOT shoulder tracking or a physical
-  fit simulation. A full back-of-head view loses face tracking, so continuous
-  rear-view fitting requires a separate body/neck tracker.
+  including its rear neck arc. A flat ring cannot wrap around a neck.
+  The runtime now fits a separate body frame from MediaPipe shoulders, not
+  the face/chin transform. Corrected cover-crop and front-camera mirroring
+  map the shared XR8 video onto its Three.js camera. A bounded shoulder-depth
+  estimate provides body yaw; head yaw cannot rotate the necklace.
+  A local cheek-referenced chroma scan estimates the exposed neck width within
+  a pose-defined neck band. That observed section also corrects collar height
+  and centre within anatomical bounds. Learned neck-to-shoulder proportions
+  survive temporary skin occlusion and reset after a body-tracking gap.
+  If clothing, hair, light or confidence prevents a
+  reliable initial outline, the preview asks for an exposed neck instead of
+  showing a guessed fit. After acquisition, cached body-relative proportions
+  maintain fit through temporary colour/skin occlusion. This is a heuristic
+  outline, not learned skin segmentation or physical sizing.
+  Render-frame smoothing and submillimetre/rotation deadbands stabilize body
+  pose; a 650ms pose timeout hides stale fits. Smoothed neck dimensions size
+  both the model and its closed depth volume.
+  The neck mask starts at the measured body base, never down the chest: rear
+  chain is hidden by the neck, while the front drape below the base remains.
+  A missing/low-confidence shoulder hides the preview after a short timeout
+  and asks the user to frame both shoulders instead of reverting to chin fit.
+  Pose inference runs on CPU inside a dedicated worker, at most one 384px
+  frame in flight, using the existing camera stream; it never blocks the
+  camera/render loop or uploads images. Worker/model assets are self-hosted.
+  The first pose may take several seconds. On unsupported devices, a clear
+  error is shown; there is no claim of guaranteed mobile performance.
+  Default sample height remains 85mm. Saved offset [0,-10,40]mm is the neutral
+  body-fit baseline; custom offsets adjust relative to that baseline. Original
+  unchanged 180mm sample defaults still resolve compatibly. Width/depth adapt
+  visually to the neck: this is not a physical measurement or cloth simulation.
+  Body orientation supports rear arcs when shoulders remain tracked; physical
+  front/side/back acceptance on iOS/Android remains required.
 - Model height: approximate millimetres converted relative to an assumed 160mm
   face width; this is a visual scale, not calibrated physical measurement.
 - Model anchor: normalized XYZ within GLB bounds; top centre is `[0.5,1,0.5]`.
-- Offset: XYZ millimetres in the face-local frame. Defaults move necklaces
-  below the chin. Rotation: XYZ Euler angles in degrees.
+- Offset: XYZ millimetres in the face-local frame for earrings; body-local
+  adjustments relative to the neutral default for necklaces. Rotation: XYZ
+  Euler angles in degrees.
 - A face-depth mesh hides geometry behind the face. Hair, ears and torso are
   not full depth meshes; no claim of perfect hair/body occlusion is made.
 
@@ -110,7 +132,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 31 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 43 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission

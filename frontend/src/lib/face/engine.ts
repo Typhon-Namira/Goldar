@@ -1,8 +1,11 @@
+import { StableNeckFrame } from "./body-stability";
+import { BodyPoseTracker } from "./body-pose";
+import { fitNeck, type NeckFit } from "./neck-fit";
 import { createNeckOccluder } from "./neck-occlusion";
 import { LobeStabilizer } from "./stabilization";
 import { LobeSurface } from "./ear-occlusion";
 import { validPoint, attachmentPlan, EarLobeTracking } from "./attachments";
-import { resolveCalibration } from "./config";
+import { defaultCalibration, resolveCalibration } from "./config";
 import * as T from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
@@ -54,6 +57,16 @@ export class FaceEngine {
   private lobeFilters = [new LobeStabilizer(), new LobeStabilizer()];
   private lobeSurfaces: LobeSurface[] = [];
   private neckDepth: T.Mesh | null = null;
+  private neckRoot = new T.Group();
+  private body: BodyPoseTracker | null = null;
+  private neckFit: NeckFit | null = null;
+  private bodyError = "";
+  private bodyStability = new StableNeckFrame();
+  private sceneCamera: T.PerspectiveCamera | null = null;
+  private facing: "front" | "back" = "front";
+  private neckRadius = 48;
+  private neckHeight = 90;
+  private necklaceHalfWidth = 58;
   private occluder = new T.Mesh(
     new T.BufferGeometry(),
     new T.MeshBasicMaterial({
@@ -87,7 +100,12 @@ export class FaceEngine {
     this.fit = T.MathUtils.clamp(value, 0.7, 1.3);
   }
   async start(facing: "front" | "back") {
-    this.status("Loading face and ear tracking…");
+    this.facing = facing;
+    this.status(
+      this.product.category === "necklace"
+        ? "Loading camera and body tracking…"
+        : "Loading face and ear tracking…",
+    );
     const xr = await loadEngine();
     if (this.disposed) return;
     this.xr = xr;
@@ -125,12 +143,38 @@ export class FaceEngine {
       });
     }
     if (this.product.category === "necklace") {
-      // Authored GLBs face +Z; XR8 face-local front is -Z.
-      this.left.rotation.y = Math.PI;
+      const bounds = new T.Box3().setFromObject(this.left);
+      this.necklaceHalfWidth = Math.max(1, (bounds.max.x - bounds.min.x) * 80);
       this.neckDepth = createNeckOccluder();
-      this.root.add(this.neckDepth);
-    }
-    this.root.add(this.left, this.right, this.occluder);
+      this.neckRoot.name = "GoldarBodyNecklace";
+      this.neckRoot.add(this.left, this.neckDepth);
+      this.neckRoot.visible = false;
+      this.body = new BodyPoseTracker(
+        (pose) => {
+          if (!this.sceneCamera || this.disposed || !pose.neck) return;
+          const camera = this.sceneCamera;
+          let depth = 1;
+          if (this.lastSeen && performance.now() - this.lastSeen < 2000) {
+            const view = this.root.position
+              .clone()
+              .applyMatrix4(camera.matrixWorldInverse);
+            depth = Math.max(0.2, -view.z);
+          }
+          const fit = fitNeck(
+            pose,
+            { width: this.canvas.width, height: this.canvas.height },
+            camera,
+            depth,
+            this.facing === "front",
+          );
+          if (fit) this.neckFit = fit;
+        },
+        (message) => {
+          this.bodyError = message;
+        },
+      );
+      this.root.add(this.occluder);
+    } else this.root.add(this.left, this.right, this.occluder);
     this.root.visible = false;
     this.occluder.renderOrder = -20;
     this.occluder.frustumCulled = false;
@@ -141,9 +185,14 @@ export class FaceEngine {
     });
     const module: PipelineModule = {
       name: "goldar-face-jewelry",
+      onCameraStatusChange: ({ status, video }) => {
+        if (status === "hasVideo" && video) this.body?.start(video);
+      },
+      onUpdate: () => this.updateBody(),
       onStart: () => {
         if (this.disposed) return;
-        const { scene, renderer } = xr.Threejs.xrScene();
+        const { scene, renderer, camera } = xr.Threejs.xrScene();
+        this.sceneCamera = camera;
         renderer.outputColorSpace = T.SRGBColorSpace;
         renderer.toneMapping = T.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1;
@@ -152,8 +201,12 @@ export class FaceEngine {
         scene.add(new T.HemisphereLight(0xffffff, 0x554533, 1.3));
         const light = new T.DirectionalLight(0xffeddb, 2);
         light.position.set(1, 2, 3);
-        scene.add(light, this.root);
-        this.status("Look at the camera. Keep your face and ears in view.");
+        scene.add(light, this.root, this.neckRoot);
+        this.status(
+          this.body
+            ? "Keep your neck and both shoulders in view."
+            : "Look at the camera. Keep your face and ears in view.",
+        );
       },
       onException: (error) => {
         if (!this.disposed) {
@@ -192,7 +245,8 @@ export class FaceEngine {
             if ((e.detail as { id: number }).id === this.faceId) {
               this.root.visible = false;
               this.faceId = null;
-              this.status("Face lost. Look towards the camera.");
+              if (!this.body)
+                this.status("Face lost. Look towards the camera.");
             }
           },
         },
@@ -208,7 +262,7 @@ export class FaceEngine {
       if (this.root.visible && performance.now() - this.lastSeen > 700) {
         this.root.visible = false;
         this.faceId = null;
-        this.status("Looking for your face…");
+        if (!this.body) this.status("Looking for your face…");
       }
     }, 200);
     const resize = () => {
@@ -340,21 +394,6 @@ export class FaceEngine {
           ? "Earring preview · tracked earlobe"
           : "Face found. Reveal your ears by moving hair aside.",
       );
-    } else {
-      place(this.left, plan.left, !!plan.left);
-      if (this.neckDepth) {
-        this.neckDepth.visible = !!plan.left;
-        if (plan.left) {
-          this.neckDepth.position.set(plan.left.x, plan.left.y, plan.left.z);
-          this.neckDepth.scale.setScalar(width / 160);
-        }
-      }
-      this.right.visible = false;
-      this.status(
-        this.left.visible
-          ? "Necklace preview · approximate placement follows your head"
-          : "Face found. Keep your chin visible.",
-      );
     }
     const vertices = face.vertices;
     if (vertices.every(validPoint) && this.occluder.geometry.index) {
@@ -381,13 +420,63 @@ export class FaceEngine {
     } else this.occluder.visible = false;
     this.root.visible = true;
   }
+  private updateBody() {
+    if (!this.body || this.disposed) return;
+    const now = performance.now();
+    const target = this.neckFit;
+    if (!target || now - target.time > 650 || this.bodyError) {
+      this.neckRoot.visible = false;
+      this.status(
+        this.bodyError ||
+          "Face the camera with your exposed neck and both shoulders visible.",
+      );
+      return;
+    }
+    const fit = this.bodyStability.update(target, now, !this.neckRoot.visible);
+    this.neckRoot.position.copy(fit.position);
+    this.neckRoot.quaternion.copy(fit.rotation);
+    this.neckRoot.scale.setScalar(fit.mm);
+    const baseline = defaultCalibration("necklace");
+    this.left.position.set(
+      this.calibration.offset_mm[0] - baseline.offset_mm[0],
+      30 + this.calibration.offset_mm[1] - baseline.offset_mm[1],
+      this.calibration.offset_mm[2] - baseline.offset_mm[2],
+    );
+    this.neckRadius = fit.radius;
+    const horizontalFit = T.MathUtils.clamp(
+      (this.neckRadius + 4) / this.necklaceHalfWidth,
+      0.65,
+      1.5,
+    );
+    this.left.scale.set(
+      160 * this.fit * horizontalFit,
+      160 * this.fit,
+      160 * this.fit * horizontalFit,
+    );
+    if (this.neckDepth) {
+      this.neckHeight = fit.height;
+      const heightRatio = (this.neckHeight + 12) / 110;
+      this.neckDepth.scale.set(
+        this.neckRadius / 48,
+        heightRatio,
+        this.neckRadius / 48,
+      );
+      this.neckDepth.position.y = -12 + 12 * heightRatio;
+    }
+    this.left.visible = true;
+    this.neckRoot.visible = true;
+    this.status("Necklace preview · shoulders tracked");
+  }
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
     if (this.watchdog) clearInterval(this.watchdog);
     this.resizeObserver?.disconnect();
+    this.body?.dispose();
     this.xr?.stop();
     this.root.removeFromParent();
+    this.neckRoot.removeFromParent();
+    disposeModel(this.neckRoot);
     disposeModel(this.root);
     if (this.model) disposeModel(this.model);
     this.environment?.dispose();

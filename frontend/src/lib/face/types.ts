@@ -23,6 +23,11 @@ export type GeometryData = { indices: { a: number; b: number; c: number }[] };
 export type PipelineModule = {
   name: string;
   onStart?: () => void;
+  onUpdate?: () => void;
+  onCameraStatusChange?: (data: {
+    status: string;
+    video?: HTMLVideoElement;
+  }) => void;
   onException?: (error: unknown) => void;
   listeners?: {
     event: string;

@@ -572,7 +572,7 @@ export default function Admin() {
                 className="wide"
                 style={{ padding: "20px 0", borderTop: "1px solid #aaa" }}
               >
-                <h3>Face fitting calibration</h3>
+                <h3>Jewelry fitting calibration</h3>
                 <p className="muted">
                   Earring: upload ONE earring, oriented upright. Necklace:
                   upload the complete 3D necklace with a rear arc, not a flat

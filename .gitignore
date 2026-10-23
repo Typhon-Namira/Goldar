@@ -13,3 +13,4 @@ __pycache__/
 # Reproducible self-hosted 8th Wall artifacts (npm prebuild/predev)
 frontend/public/vendor/8thwall/
 frontend/public/vendor/three/
+frontend/public/vendor/mediapipe/

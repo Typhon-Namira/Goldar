@@ -1,0 +1,5 @@
+Google MediaPipe / BlazePose models
+Source: @mediapipe/pose@0.5.1675469404 (Google; Apache-2.0).
+Task archive repackaged by Goldar with input normalization metadata.
+Model weights are unchanged. See /models/tracking/LICENSE.txt and the repository's
+docs/THIRD_PARTY_FACE_ENGINE.md for provenance and reproducibility instructions.

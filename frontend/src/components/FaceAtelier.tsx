@@ -72,7 +72,7 @@ export default function FaceAtelier({ product }: { product: Product }) {
               Discover {product.name} on you.
               <br />
               {necklace
-                ? "A face-guided necklace preview."
+                ? "A body-fitted necklace preview."
                 : "Reveal your ears and explore every angle."}
             </p>
             <button
@@ -133,7 +133,7 @@ export default function FaceAtelier({ product }: { product: Product }) {
       <div className="atelier-note">
         <p>
           {necklace
-            ? "A 3D necklace wraps around an estimated neck volume, hiding chain behind it. Placement follows your head; shoulders and the back of your head are not tracked."
+            ? "Keep your neck and both shoulders in view. The necklace follows your body, using your neck outline when visible. Fit and depth are approximate."
             : "Use a model of one earring. Earrings attach only to detected earlobes and hide when tracking is lost. Earlobe depth is approximate; hair is not masked. Preview size is approximate."}
         </p>
         <p>
@@ -150,6 +150,18 @@ export default function FaceAtelier({ product }: { product: Product }) {
             MIT license
           </a>
         </p>
+        {necklace && (
+          <p>
+            Body tracking by Google MediaPipe ·{" "}
+            <a
+              href="/models/tracking/LICENSE.txt"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Apache 2.0 license
+            </a>
+          </p>
+        )}
       </div>
     </section>
   );

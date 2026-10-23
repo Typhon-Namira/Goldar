@@ -23,3 +23,14 @@ await copyFile(
   resolve(threeRoot, "LICENSE"),
   resolve(root, "public/vendor/three/LICENSE.txt"),
 );
+
+const visionRoot = dirname(require.resolve("@mediapipe/tasks-vision"));
+const visionOutput = resolve(root, "public/vendor/mediapipe");
+await mkdir(visionOutput, { recursive: true });
+await copyFile(
+  resolve(visionRoot, "vision_bundle.cjs"),
+  resolve(visionOutput, "vision_bundle.js"),
+);
+await cp(resolve(visionRoot, "wasm"), resolve(visionOutput, "wasm"), {
+  recursive: true,
+});

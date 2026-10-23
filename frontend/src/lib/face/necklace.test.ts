@@ -41,28 +41,38 @@ describe("necklace placement compatibility", () => {
 });
 
 describe("neck depth occlusion", () => {
-  it("hides a rear chain from the front, while preserving the front chain", () => {
+  it("occludes rear arc behind the measured neck, preserving front drape", () => {
     const mask = createNeckOccluder();
     mask.updateMatrixWorld(true);
-    const ray = new Raycaster(new Vector3(0, -45, -200), new Vector3(0, 0, 1));
-    const hit = ray.intersectObject(mask)[0];
-    expect(hit).toBeDefined();
-    expect(hit.point.z).toBeLessThan(40);
-    expect(hit.point.z).toBeGreaterThan(-4);
+    const hit = new Raycaster(
+      new Vector3(0, 30, 200),
+      new Vector3(0, 0, -1),
+    ).intersectObject(mask)[0];
+    expect(hit.point.z).toBeGreaterThan(0);
+    expect(hit.point.z).toBeLessThan(42);
     expect(mask.material.colorWrite).toBe(false);
     const bounds = new Box3().setFromObject(mask);
-    expect(bounds.max.y).toBeCloseTo(-8);
-    expect(bounds.min.y).toBeCloseTo(-110);
+    expect(bounds.max.y).toBeCloseTo(98);
+    expect(bounds.min.y).toBeCloseTo(-12);
+    // Chest-level front chain is never erased by a neck-shaped mask.
+    expect(
+      new Raycaster(
+        new Vector3(0, -40, 200),
+        new Vector3(0, 0, -1),
+      ).intersectObject(mask),
+    ).toHaveLength(0);
     mask.geometry.dispose();
     mask.material.dispose();
   });
-  it("has a rear surface that hides front chain when viewed from behind", () => {
+  it("preserves rear arc when viewed from behind", () => {
     const mask = createNeckOccluder();
     mask.updateMatrixWorld(true);
-    const ray = new Raycaster(new Vector3(0, -45, 200), new Vector3(0, 0, -1));
-    const hit = ray.intersectObject(mask)[0];
-    expect(hit.point.z).toBeGreaterThan(40);
-    expect(hit.point.z).toBeLessThan(85);
+    const hit = new Raycaster(
+      new Vector3(0, 30, -200),
+      new Vector3(0, 0, 1),
+    ).intersectObject(mask)[0];
+    expect(hit.point.z).toBeLessThan(0);
+    expect(hit.point.z).toBeGreaterThan(-42);
     mask.geometry.dispose();
     mask.material.dispose();
   });
