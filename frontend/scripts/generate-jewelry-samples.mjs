@@ -1,22 +1,40 @@
 // Original procedural demonstration assets; no external product models.
-import { TorusGeometry, IcosahedronGeometry } from "three";
+import {
+  TorusGeometry,
+  IcosahedronGeometry,
+  TubeGeometry,
+  Curve,
+  Vector3,
+} from "three";
 import { writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 const output = fileURLToPath(new URL("../public/models/", import.meta.url));
 await mkdir(output, { recursive: true });
 for (const category of ["earring", "necklace"]) {
-  const hoop = new TorusGeometry(
-    category === "earring" ? 0.009 : 0.075,
-    category === "earring" ? 0.001 : 0.0018,
-    12,
-    64,
-  );
-  if (category === "necklace") hoop.scale(1, 1.2, 1);
+  class NecklacePath extends Curve {
+    getPoint(t, target = new Vector3()) {
+      const angle = t * Math.PI * 2;
+      const front = (Math.sin(angle) + 1) / 2;
+      return target.set(
+        0.055 * Math.cos(angle),
+        -0.065 * front ** 1.4,
+        0.042 * Math.sin(angle),
+      );
+    }
+  }
+  const hoop =
+    category === "earring"
+      ? new TorusGeometry(0.009, 0.001, 12, 64)
+      : new TubeGeometry(new NecklacePath(), 192, 0.0013, 10, true);
   const gem = new IcosahedronGeometry(
-    category === "earring" ? 0.004 : 0.012,
-    1,
+    category === "earring" ? 0.004 : 0.008,
+    category === "earring" ? 1 : 2,
   );
-  gem.translate(0, category === "earring" ? -0.015 : -0.1, 0);
+  gem.translate(
+    0,
+    category === "earring" ? -0.015 : -0.071,
+    category === "earring" ? 0 : 0.044,
+  );
   const views = [],
     accessors = [],
     chunks = [],

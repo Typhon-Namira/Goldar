@@ -9,7 +9,7 @@ import {
   slugify,
   API,
 } from "@/lib/api";
-import { defaultCalibration } from "@/lib/face/config";
+import { defaultCalibration, resolveCalibration } from "@/lib/face/config";
 import { QRCodeSVG } from "qrcode.react";
 const emptyStore = {
   name: "",
@@ -135,9 +135,7 @@ export default function Admin() {
     setMessage("");
   }
   function startProduct(p?: Product) {
-    setFaceConfig(
-      p?.face_calibration ?? defaultCalibration(p?.category ?? "earring"),
-    );
+    setFaceConfig(p ? resolveCalibration(p) : defaultCalibration("earring"));
     setProductForm(
       p
         ? {
@@ -577,9 +575,10 @@ export default function Admin() {
                 <h3>Face fitting calibration</h3>
                 <p className="muted">
                   Earring: upload ONE earring, oriented upright. Necklace:
-                  upload the complete necklace. Set the model height and
-                  attachment point; preview sizing is relative to an estimated
-                  face width, not a physical measurement.
+                  upload the complete 3D necklace with a rear arc, not a flat
+                  ring. Set the model height and attachment point; preview
+                  sizing is relative to an estimated face width, not a physical
+                  measurement.
                 </p>
                 <div className="form-grid">
                   <label className="field">

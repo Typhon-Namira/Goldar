@@ -51,9 +51,20 @@ they are not a representation of a merchant's actual jewelry.
   This is not segmentation or a scanned ear surface, and physical-phone
   validation remains necessary. Product XYZ offsets and model anchors tune
   each asset; preview fit changes jewelry size without resizing the tissue.
-- Necklace: the complete upright necklace, facing the camera in the XY plane.
-  It is attached below the chin using the saved offset. It follows head motion:
-  this is NOT shoulder tracking or a physical fit simulation.
+- Necklace: a complete volumetric chain, front along +Z and up along +Y,
+  including its rear neck arc. The runtime rotates authored +Z fronts onto
+  XR8 face-local -Z; positive face-local Z is behind the chin.
+  A flat XY ring cannot wrap around a neck.
+  The original sample is now an elliptical 3D loop with a lowered front arc
+  and pendant. Default height is 85mm, with chin-relative offset [0,-10,40]mm.
+  A closed elliptical neck-depth proxy hides chain behind the neck, from
+  either viewing direction. It does not stretch with the preview fit slider.
+  Only the unchanged calibration of the old built-in sample (180mm,
+  [0,-45,10]mm) resolves to the new defaults, in both dashboard and runtime;
+  merchant models and custom saved calibrations are preserved.
+  Placement follows head motion: this is NOT shoulder tracking or a physical
+  fit simulation. A full back-of-head view loses face tracking, so continuous
+  rear-view fitting requires a separate body/neck tracker.
 - Model height: approximate millimetres converted relative to an assumed 160mm
   face width; this is a visual scale, not calibrated physical measurement.
 - Model anchor: normalized XYZ within GLB bounds; top centre is `[0.5,1,0.5]`.
@@ -99,7 +110,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 26 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 31 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission

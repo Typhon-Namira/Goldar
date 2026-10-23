@@ -133,7 +133,7 @@ export default function FaceAtelier({ product }: { product: Product }) {
       <div className="atelier-note">
         <p>
           {necklace
-            ? "Approximate necklace placement is guided by your chin and follows head motion. It does not track your shoulders or measure neck size."
+            ? "A 3D necklace wraps around an estimated neck volume, hiding chain behind it. Placement follows your head; shoulders and the back of your head are not tracked."
             : "Use a model of one earring. Earrings attach only to detected earlobes and hide when tracking is lost. Earlobe depth is approximate; hair is not masked. Preview size is approximate."}
         </p>
         <p>

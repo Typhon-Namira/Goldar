@@ -1,7 +1,8 @@
+import { createNeckOccluder } from "./neck-occlusion";
 import { LobeStabilizer } from "./stabilization";
 import { LobeSurface } from "./ear-occlusion";
 import { validPoint, attachmentPlan, EarLobeTracking } from "./attachments";
-import { defaultCalibration } from "./config";
+import { resolveCalibration } from "./config";
 import * as T from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
@@ -52,6 +53,7 @@ export class FaceEngine {
   private right = new T.Group();
   private lobeFilters = [new LobeStabilizer(), new LobeStabilizer()];
   private lobeSurfaces: LobeSurface[] = [];
+  private neckDepth: T.Mesh | null = null;
   private occluder = new T.Mesh(
     new T.BufferGeometry(),
     new T.MeshBasicMaterial({
@@ -79,8 +81,7 @@ export class FaceEngine {
     this.root.name = "GoldarFaceJewelry";
     this.left.name = "GoldarLeftJewelry";
     this.right.name = "GoldarRightJewelry";
-    this.calibration =
-      product.face_calibration ?? defaultCalibration(product.category);
+    this.calibration = resolveCalibration(product);
   }
   setFit(value: number) {
     this.fit = T.MathUtils.clamp(value, 0.7, 1.3);
@@ -122,6 +123,12 @@ export class FaceEngine {
         group.visible = false;
         this.root.add(group);
       });
+    }
+    if (this.product.category === "necklace") {
+      // Authored GLBs face +Z; XR8 face-local front is -Z.
+      this.left.rotation.y = Math.PI;
+      this.neckDepth = createNeckOccluder();
+      this.root.add(this.neckDepth);
     }
     this.root.add(this.left, this.right, this.occluder);
     this.root.visible = false;
@@ -335,6 +342,13 @@ export class FaceEngine {
       );
     } else {
       place(this.left, plan.left, !!plan.left);
+      if (this.neckDepth) {
+        this.neckDepth.visible = !!plan.left;
+        if (plan.left) {
+          this.neckDepth.position.set(plan.left.x, plan.left.y, plan.left.z);
+          this.neckDepth.scale.setScalar(width / 160);
+        }
+      }
       this.right.visible = false;
       this.status(
         this.left.visible
