@@ -34,3 +34,13 @@ The 2D projection assumes a pinhole camera with WiLoR's estimated focal
 length. Real ring sizing requires calibration. No frames are stored.
 
 Check WiLoR and MANO licensing before commercial deployment.
+
+The repository sidecar now returns a camera-space posed MANO `mesh` (778
+vertices, native triangle topology, intrinsics and explicit metre units),
+required by Ring Atelier. It uses `model.mano.faces` and `pred_vertices` from
+the same WiLoR forward pass as joints. Validate against the installed upstream
+model before deploying. No canonical MANO rig buffers are distributed.
+Set `NEXT_PUBLIC_WILOR_API_URL` in the frontend environment before its build.
+See `docs/RING_ATELIER_ARCHITECTURE.md` for temporal synchronization, contracts,
+quality limits and device acceptance checks. Updating this file does not deploy
+or restart an existing EC2 service.

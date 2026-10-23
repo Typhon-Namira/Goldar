@@ -1,0 +1,340 @@
+/* Ring Atelier: one fitting experience, independent of tracking internals. */
+.ring-atelier {
+  max-width: 1040px;
+  margin: 0 auto;
+  background: #f8f5ef;
+  border: 1px solid #ded7ca;
+  color: #28271f;
+}
+.atelier-stage {
+  position: relative;
+  height: min(78svh, 760px);
+  min-height: 480px;
+  overflow: hidden;
+  background: radial-gradient(
+    ellipse at 50% 36%,
+    #454a40 0%,
+    #242b25 48%,
+    #171e1a 100%
+  );
+  color: #f9f5ed;
+}
+.atelier-capture {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.atelier-render {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.atelier-render.is-mirrored {
+  transform: scaleX(-1);
+}
+.atelier-topline {
+  position: absolute;
+  inset: 28px 30px auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  z-index: 2;
+}
+.atelier-topline i {
+  padding: 0 10px;
+  color: #c9b181;
+}
+.atelier-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.atelier-live > span {
+  width: 5px;
+  height: 5px;
+  background: #baad92;
+  border-radius: 50%;
+}
+.atelier-live > span.is-active {
+  background: #adcc9c;
+}
+.atelier-welcome {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: radial-gradient(ellipse at 50% 36%, #454a40, #171e1a);
+  padding: 70px 24px;
+}
+.atelier-orbit {
+  border: 1px solid #c3ac7955;
+  border-radius: 50%;
+  width: 68px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  transform: rotate(-20deg);
+  margin-bottom: 24px;
+  box-shadow: 0 0 0 9px #c3ac7908;
+}
+.atelier-orbit span {
+  font:
+    italic 38px Georgia,
+    serif;
+  transform: rotate(20deg);
+  color: #d4c098;
+}
+.atelier-kicker {
+  font-size: 9px;
+  letter-spacing: 0.23em;
+  color: #998363;
+  text-transform: uppercase;
+}
+.atelier-welcome h2 {
+  font:
+    400 clamp(40px, 6vw, 72px)/1.06 Georgia,
+    serif;
+  margin: 12px 0 20px;
+  letter-spacing: -0.04em;
+}
+.atelier-welcome h2 em {
+  font-weight: 400;
+  color: #d6c4a2;
+}
+.atelier-welcome > p:not(.atelier-kicker) {
+  font-size: 12px;
+  line-height: 1.9;
+  color: #c8c9bd;
+}
+.atelier-primary {
+  margin-top: 25px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 17px 25px;
+  background: #e3d4b7;
+  color: #262c24;
+  border: 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+.atelier-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.atelier-welcome small {
+  margin-top: 15px;
+  font-size: 9px;
+  color: #adaf9f;
+}
+.atelier-feedback {
+  position: absolute;
+  bottom: 27px;
+  left: 28px;
+  right: 80px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  z-index: 2;
+  text-shadow: 0 1px 6px #000;
+  background: #162018a8;
+  padding: 10px 14px;
+  border-radius: 2px;
+  backdrop-filter: blur(8px);
+  width: fit-content;
+}
+.atelier-indicator {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  background: #c7b17e;
+  border-radius: 50%;
+}
+.atelier-feedback.has-error {
+  color: #ffe0ce;
+}
+.atelier-stop {
+  position: absolute;
+  right: 25px;
+  bottom: 25px;
+  border: 1px solid #ffffff40;
+  color: #fff;
+  background: #15201888;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.atelier-guide {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0.12;
+  pointer-events: none;
+}
+.atelier-details {
+  padding: 30px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid #e6dfd3;
+}
+.atelier-details h3 {
+  font:
+    normal 28px Georgia,
+    serif;
+  margin: 8px 0;
+}
+.atelier-details p:not(.atelier-kicker) {
+  font-size: 11px;
+  color: #7a766b;
+  margin: 6px 0;
+}
+.atelier-actions {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.atelier-actions button,
+.atelier-actions a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  background: none;
+  border: 0;
+  color: #5a594c;
+  cursor: pointer;
+  padding: 8px 0;
+}
+.atelier-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.atelier-adjust {
+  display: flex;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 24px 32px;
+}
+.atelier-adjust fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.atelier-adjust legend,
+.atelier-fit {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #6b675b;
+}
+.atelier-fingers {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.atelier-fingers button {
+  background: transparent;
+  border: 1px solid #dcd5c6;
+  padding: 10px 18px;
+  font-size: 10px;
+  color: #777162;
+  cursor: pointer;
+}
+.atelier-fingers button[aria-pressed="true"] {
+  background: #30392e;
+  color: #f3ead8;
+  border-color: #30392e;
+}
+.atelier-fit {
+  width: 210px;
+  padding-top: 2px;
+}
+.atelier-fit span {
+  float: right;
+}
+.atelier-fit input {
+  display: block;
+  width: 100%;
+  margin-top: 20px;
+  accent-color: #8b7752;
+}
+.atelier-note {
+  padding: 0 32px 22px;
+  font-size: 10px;
+  line-height: 1.7;
+  color: #898376;
+}
+.atelier-note p {
+  margin: 0;
+}
+.atelier-note span {
+  display: block;
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.atelier-unavailable {
+  text-align: center;
+  padding: 40px;
+}
+.ring-atelier button:focus-visible,
+.ring-atelier a:focus-visible,
+.ring-atelier input:focus-visible {
+  outline: 2px solid #b69960;
+  outline-offset: 4px;
+}
+@media (max-width: 650px) {
+  .atelier-topline {
+    inset: 20px 18px auto;
+    font-size: 8px;
+    letter-spacing: 0.1em;
+  }
+  .atelier-stage {
+    min-height: 500px;
+    height: 72svh;
+  }
+  .atelier-details {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 24px 20px;
+  }
+  .atelier-adjust {
+    flex-direction: column;
+    padding: 22px 20px;
+    gap: 24px;
+  }
+  .atelier-fit {
+    width: 100%;
+  }
+  .atelier-note {
+    padding: 0 20px 22px;
+  }
+  .atelier-feedback {
+    left: 16px;
+    bottom: 19px;
+    font-size: 10px;
+  }
+  .atelier-stop {
+    right: 17px;
+    bottom: 17px;
+  }
+  .atelier-fingers button {
+    padding: 10px 16px;
+  }
+}

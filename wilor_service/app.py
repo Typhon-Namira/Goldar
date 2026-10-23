@@ -80,7 +80,18 @@ def _infer(img):
     py = focal.item() * camera_joints[:, 1] / depth + h / 2
     if not np.isfinite(camera_joints).all() or len(joints) != 21:
         raise ValueError("Invalid 3D hand joints from WiLoR")
+    # Use the same native forward pass for the posed hand and its joints.
+    # Canonical templates and skinning weights are never sent to browsers.
+    vertices = out["pred_vertices"][0].detach().cpu().numpy().copy()
+    vertices[:, 0] *= (2 * right - 1)
+    vertices += camera_t[None, :]
+    faces = np.asarray(state["model"].mano.faces, dtype=np.int64)
+    if vertices.shape != (778, 3) or not np.isfinite(vertices).all() or np.any(vertices[:, 2] <= 0):
+        raise ValueError("Invalid posed hand mesh")
+    if right < 0.5:
+        faces = faces[:, [0, 2, 1]]
     return {
+        "schemaVersion": 1,
         "detected": True,
         "hands": [{
             "side": "Right" if right >= 0.5 else "Left",
@@ -89,6 +100,15 @@ def _infer(img):
             "worldLandmarks": [{"x": float(x), "y": float(y), "z": float(z)} for x, y, z in joints],
             "cameraTranslation": camera_t.tolist(),
             "focalLengthPx": float(focal.item()),
+            "mesh": {
+                "available": True, "coordinateSystem": "opencv_camera", "units": "meters",
+                "vertices": vertices.tolist(), "faces": faces.tolist(),
+                "camera": {
+                    "fx": float(focal.item()), "fy": float(focal.item()),
+                    "cx": w / 2, "cy": h / 2, "width": w, "height": h,
+                    "source": "estimated",
+                },
+            },
         }],
         "imageWidth": w, "imageHeight": h,
     }

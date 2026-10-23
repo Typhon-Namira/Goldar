@@ -71,23 +71,6 @@ export function inspectRingGeometry(model:THREE.Object3D, override?:RingCalibrat
   stoneDirection.addScaledVector(axis,-stoneDirection.dot(axis));
   if(stoneDirection.lengthSq()>1e-8)stoneDirection.normalize();else stoneDirection.set(0,0,1);
  }
- // This GLB has a nonuniformly scaled, rotated Torus and a separate
- // Dodecahedron stone. Its ring hole is along root X, not root Y.
- // Use measured root-space values instead of relying on its bounding box.
- const namedTorus=meshes.find(m=>m.name==="Torus"&&
-  m.geometry.getAttribute("position").count===20000);
- const namedStone=meshes.find(m=>m.name==="Dodecahedron");
- if(namedTorus&&namedStone){
-  const torusCenter=new THREE.Vector3(0.0149866,0.2123314,0).applyMatrix4(
-   new THREE.Matrix4().multiplyMatrices(inverseRoot,model.matrixWorld));
-  center.copy(torusCenter);
-  axis.set(1,0,0);
-  inner=0.31422;
-  const stoneCenter=new THREE.Box3().setFromObject(namedStone)
-   .getCenter(new THREE.Vector3()).applyMatrix4(inverseRoot);
-  stoneDirection.copy(stoneCenter.sub(center)).normalize();
-  source="geometry";
- }
  if(override){
   if(override.center?.length===3&&override.center.every(Number.isFinite))center=v(override.center);
   if(override.holeAxis?.length===3&&override.holeAxis.every(Number.isFinite)&&v(override.holeAxis).lengthSq()>1e-8)axis=v(override.holeAxis).normalize();
