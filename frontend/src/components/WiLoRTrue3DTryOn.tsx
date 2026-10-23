@@ -7,13 +7,10 @@ import type {Product} from "@/lib/api";
 import type {FingerName,HandSide} from "@/lib/handPose";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
 import {GoldarSpatialEngine,type SpatialObservation} from "@/lib/goldarSpatialEngine";
-import type {Joint} from "@/lib/unifiedHandTrack";
-import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
+import {WiLoRInferenceClient,type WiLoRResponse} from "@/lib/wilorInferenceClient";
 import {parseManoSnapshot,type ManoSnapshot} from "@/lib/manoSnapshot";
 
 
-type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown;manoLbs?:unknown};
-type RemoteResult={hands?:RemoteHand[];inferenceMs?:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
 
 export default function WiLoRTrue3DTryOn({product}:{product:Product}){
@@ -53,7 +50,8 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    let lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
    let lastMeshCapture=0;
    let rejectedUpdates=0;
-   let busy=false,raf=0,controller:AbortController|null=null;
+   let busy=false,raf=0;
+   const inference=new WiLoRInferenceClient(ENDPOINT);
    
    const stage=document.createElement("canvas");stage.width=480;stage.height=360;
    const ctx=stage.getContext("2d");
@@ -90,16 +88,8 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     try{
      const blob=await new Promise<Blob|null>(resolve=>stage.toBlob(resolve,"image/jpeg",.75));
      if(!blob||disposed)return;
-     const form=new FormData();form.append("frame",blob,"hand.jpg");form.append("include_mesh","true");
-     controller=new AbortController();
-     const abortController=controller;
-     const timeout=setTimeout(()=>abortController.abort(),11000);
-     let data:RemoteResult;
-     try{
-      const response=await fetch(ENDPOINT+"/v1/hand-pose",{method:"POST",body:form,signal:abortController.signal});
-      if(!response.ok)throw new Error("WiLoR HTTP "+response.status);
-      data=await response.json() as RemoteResult;
-     }finally{clearTimeout(timeout)}
+     const data:WiLoRResponse|null=await inference.infer(blob,captured);
+     if(!data)return;
      if(disposed)return;
      const available=(data.hands||[]).filter(h=>h.mesh?.available&&h.landmarks?.length===21);
      const hand=available.find(h=>h.side===side)||available[0];
@@ -135,7 +125,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      setStatus("3D active · WiLoR spatial mesh · "+
       hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
     }catch(e){if(!disposed&&!track)setStatus("WiLoR: "+(e instanceof Error?e.message:"network error"))}
-    finally{busy=false;controller=null}
+    finally{busy=false}
    };
    const tick=(now:number)=>{
     if(disposed)return;
@@ -164,7 +154,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     renderer.render(scene,camera);
    };
    cleanup.current=()=>{
-    disposed=true;controller?.abort();cancelAnimationFrame(raf);
+    disposed=true;inference.dispose();cancelAnimationFrame(raf);
     stream?.getTracks().forEach(t=>t.stop());video.pause();video.srcObject=null;
     if(track){scene.remove(track.occluder);track.dispose()}
     scene.traverse(o=>{if(o instanceof THREE.Mesh){
