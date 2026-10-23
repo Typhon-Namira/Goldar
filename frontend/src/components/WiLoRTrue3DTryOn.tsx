@@ -6,13 +6,13 @@ import {GLTFLoader} from "three/examples/jsm/loaders/GLTFLoader.js";
 import type {Product} from "@/lib/api";
 import type {FingerName,HandSide} from "@/lib/handPose";
 import {inspectRingGeometry,attachCalibratedRing} from "@/lib/ringCalibration";
-import {UnifiedHandTrack,cameraProjection,type Joint} from "@/lib/unifiedHandTrack";
+import {GoldarSpatialEngine,type SpatialObservation} from "@/lib/goldarSpatialEngine";
+import type {Joint} from "@/lib/unifiedHandTrack";
 import type {RemoteHandMesh} from "@/lib/handMeshOcclusion";
 import {parseManoSnapshot,type ManoSnapshot} from "@/lib/manoSnapshot";
-import {skinMano,type ManoRig,type ManoPose} from "@/lib/manoLbs";
 
-type LbsPayload={schemaVersion:number;rig:ManoRig;pose:ManoPose;requiresModelToCameraTransform:boolean};
-type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown;manoLbs?:LbsPayload};
+
+type RemoteHand={side:"Left"|"Right";landmarks:Joint[];mesh?:RemoteHandMesh;mano?:unknown;manoLbs?:unknown};
 type RemoteResult={hands?:RemoteHand[];inferenceMs?:number};
 const ENDPOINT=(process.env.NEXT_PUBLIC_WILOR_API_URL||"").replace(/\/$/,"");
 
@@ -47,7 +47,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    scene.add(new THREE.AmbientLight(0xffffff,1.8));
    const light=new THREE.DirectionalLight(0xffffff,2);light.position.set(1,2,1);scene.add(light);
    const ringPivot=new THREE.Group();ringPivot.add(ring);ringPivot.visible=false;scene.add(ringPivot);
-   let track:UnifiedHandTrack|null=null;
+   let track:GoldarSpatialEngine|null=null;
    let fittedDiameter=0;
    let latestMano:ManoSnapshot|null=null;
    let lastRequest=0,lastGood=0,lastLiveSide:HandSide="Unknown";
@@ -63,12 +63,12 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     const pixelRatio=renderer.getPixelRatio();
     if(canvas.width!==Math.round(w*pixelRatio)||canvas.height!==Math.round(h*pixelRatio))
      renderer.setSize(w,h,false);
-    if(track)cameraProjection(camera,track.camera,video.videoWidth,video.videoHeight,w,h);
+    if(track)track.project(camera,video.videoWidth,video.videoHeight,w,h);
    };
-   const replaceTrack=(next:UnifiedHandTrack)=>{
+   const replaceTrack=(next:GoldarSpatialEngine)=>{
     if(track){scene.remove(track.occluder);track.dispose()}
     track=next;scene.add(next.occluder);
-    const physicalDiameter=next.ringRadius*2*1.06*fit;
+    const physicalDiameter=next.diameter*fit;
     fittedDiameter=physicalDiameter;
     ringPivot.scale.setScalar(physicalDiameter/Math.max(.00001,calibration.innerDiameter));
     updateSize();
@@ -108,74 +108,32 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
      if(performance.now()-captured>9000)return;
      // Preserve the current track between asynchronous WiLoR updates.
      if(captured<=lastMeshCapture)return;
-     if(track){
-      if(track.update(hand.landmarks,performance.now())){
-       rejectedUpdates=0;
-       ringPivot.position.copy(track.ringPosition);
-       ringPivot.quaternion.copy(track.ringRotation);
-       ringPivot.visible=true;track.occluder.visible=true;
-       lastGood=performance.now();
-      }else if(++rejectedUpdates>=3){
-       // Reacquire when the hand has moved beyond the original mesh pose.
-       scene.remove(track.occluder);track.dispose();track=null;
-       rejectedUpdates=0;
-       ringPivot.visible=false;
-      }else{
-       lastMeshCapture=captured;
-       return;
-      }
-      if(track){lastMeshCapture=captured;return;}
-     }
-     // MANO supplies the anatomical surface at acquisition. The live
-     // camera tracker subsequently moves its locked finger-local frame.
      const parsedMano=parseManoSnapshot(hand.mano);
-     // Prefer exact 16-joint MANO skinning when a licensed, matching rig is
-     // explicitly supplied. Otherwise retain the native WiLoR mesh; never
-     // fabricate MANO weights from 21 MediaPipe landmarks.
-     let acquisitionMesh=hand.mesh;
-     let exactLbs=false;
-     const lbs=hand.manoLbs;
-     if(lbs?.schemaVersion===1&&lbs.requiresModelToCameraTransform===true&&
-        parsedMano?.cameraTranslation?.length===3){
-      try{
-       const skinned=skinMano(lbs.rig,lbs.pose).vertices;
-       const t=parsedMano.cameraTranslation;
-       const handedness=hand.side==="Right"?1:-1;
-       const cameraVertices=skinned.map(v=>[
-        v.x*handedness+t[0],v.y+t[1],v.z+t[2]
-       ]);
-       if(cameraVertices.every(v=>v.every(Number.isFinite)&&v[2]>0)&&
-          cameraVertices.length===hand.mesh.vertices.length){
-        // The reconstructed surface must agree with WiLoR's native mesh.
-        // Otherwise a mismatched MANO version/side would displace the ring.
-        const maxError=cameraVertices.reduce((max,v,i)=>{
-         const original=hand.mesh!.vertices[i];
-         return Math.max(max,Math.hypot(
-          v[0]-original[0],v[1]-original[1],v[2]-original[2]));
-        },0);
-        if(maxError<.003){
-         acquisitionMesh={...hand.mesh,vertices:cameraVertices};
-         exactLbs=true;
-        }
-       }
-      }catch{/* Incompatible rig: use native WiLoR mesh safely. */}
+     const observation:SpatialObservation={
+      mesh:hand.mesh,landmarks:hand.landmarks,mano:parsedMano,
+      side:hand.side,capturedAt:captured,receivedAt:performance.now()
+     };
+     if(track&&!track.update(observation)){
+      // Do not hide the ring for one rejected frame. Reacquire after
+      // sustained invalid or mismatched geometry.
+      if(++rejectedUpdates<3)return;
+      scene.remove(track.occluder);track.dispose();track=null;
+      rejectedUpdates=0;
      }
-     const next=new UnifiedHandTrack(acquisitionMesh,hand.landmarks,finger,hand.side,captured,exactLbs?lbs?.rig:undefined);
-     if(!next.update(hand.landmarks,captured)){
-      next.dispose();if(!track)setStatus("Waiting for consistent 3D calibration");return;
+     if(!track){
+      const next=new GoldarSpatialEngine(observation,finger);
+      replaceTrack(next);
+      rejectedUpdates=0;
      }
-
-     if(track){next.dispose();return}
-     replaceTrack(next);
-     ringPivot.position.copy(next.ringPosition);
-     ringPivot.quaternion.copy(next.ringRotation);
+     ringPivot.position.copy(track.position);
+     ringPivot.quaternion.copy(track.rotation);
      ringPivot.visible=true;
-     next.occluder.visible=true;
+     track.occluder.visible=true;
      lastGood=performance.now();
      lastMeshCapture=captured;
      latestMano=parsedMano;
-     setStatus("3D active · "+(exactLbs?"MANO-weighted live tracking":latestMano?"MANO parameters validated":"mesh fallback")+
-      " · "+hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
+     setStatus("3D active · WiLoR spatial mesh · "+
+      hand.mesh.vertices.length+" vertices · "+Math.round(data.inferenceMs||0)+" ms");
     }catch(e){if(!disposed&&!track)setStatus("WiLoR: "+(e instanceof Error?e.message:"network error"))}
     finally{busy=false;controller=null}
    };
@@ -185,9 +143,9 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
     if(video.readyState>=2&&video.videoWidth>0){
      // WiLoR is the sole tracking authority; do not mix MediaPipe poses.
      void fetchMesh(lastLiveSide,now);
-     if(track&&track.lastSeen>0&&now-track.lastSeen<700){
-      ringPivot.position.copy(track.ringPosition);
-      ringPivot.quaternion.copy(track.ringRotation);
+     if(track&&track.lastReceived>0&&now-track.lastReceived<1000){
+      ringPivot.position.copy(track.position);
+      ringPivot.quaternion.copy(track.rotation);
       ringPivot.scale.setScalar(fittedDiameter/Math.max(.00001,calibration.innerDiameter));
       ringPivot.visible=true;track.occluder.visible=true;
      }
@@ -231,7 +189,7 @@ export default function WiLoRTrue3DTryOn({product}:{product:Product}){
    </div>
    <label className="tryon-setting">Finger <select disabled={running} value={finger} onChange={e=>setFinger(e.target.value as FingerName)}>{(["ring","index","middle","pinky"] as const).map(f=><option key={f} value={f}>{f}</option>)}</select></label>
    <label className="tryon-setting">Fit <input type="range" min=".85" max="1.25" step=".025" disabled={running} value={fit} onChange={e=>setFit(Number(e.target.value))}/><strong>{Math.round(fit*100)}%</strong></label>
-   <p className="tryon-disclaimer">WiLoR-only pose tracking. No MediaPipe landmarks are mixed into MANO geometry. Network inference cadence limits smoothness; this is not full frame-rate MANO pose fitting or calibrated SLAM.</p>
+   <p className="tryon-disclaimer">Goldar Spatial Engine: WiLoR is the only geometric authority. Every accepted snapshot updates the full MANO mesh. Inference/network latency and uncalibrated camera intrinsics still limit accuracy.</p>
   </div>
  </section>;
 }
