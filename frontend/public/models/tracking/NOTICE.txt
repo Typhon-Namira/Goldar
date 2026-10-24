@@ -3,3 +3,8 @@ Source: @mediapipe/pose@0.5.1675469404 (Google; Apache-2.0).
 Task archive repackaged by Goldar with input normalization metadata.
 Model weights are unchanged. See /models/tracking/LICENSE.txt and the repository's
 docs/THIRD_PARTY_FACE_ENGINE.md for provenance and reproducibility instructions.
+
+Google MediaPipe Selfie Segmentation model
+Source: @mediapipe/selfie_segmentation@0.1.1675465747 (Google; Apache-2.0).
+Input normalization metadata added by Goldar; model weights unchanged.
+See the same LICENSE.txt and THIRD_PARTY_FACE_ENGINE.md for reproduction.

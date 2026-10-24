@@ -59,15 +59,16 @@ they are not a representation of a merchant's actual jewelry.
   the face/chin transform. Corrected cover-crop and front-camera mirroring
   map the shared XR8 video onto its Three.js camera. A bounded shoulder-depth
   estimate provides body yaw; head yaw cannot rotate the necklace.
-  A local cheek-referenced chroma scan estimates the exposed neck width within
-  a pose-defined neck band. That observed section also corrects collar height
-  and centre within anatomical bounds. Learned neck-to-shoulder proportions
-  survive temporary skin occlusion and reset after a body-tracking gap.
-  If clothing, hair, light or confidence prevents a
-  reliable initial outline, the preview asks for an exposed neck instead of
-  showing a guessed fit. After acquisition, cached body-relative proportions
-  maintain fit through temporary colour/skin occlusion. This is a heuristic
-  outline, not learned skin segmentation or physical sizing.
+  A local learned person mask supplies silhouette boundaries in a band below
+  the current XR8 chin and above the shoulders. Internal shadows cannot become
+  neck edges. The measured section directly anchors the collar; projected
+  depth-volume edges are refined against those same video coordinates instead
+  of shifting an independent mask down onto the chest. Cached body-relative
+  proportions survive brief silhouette dropouts and reset after tracking loss.
+  A missing initial contour waits for a measurable neck rather than guessing.
+  This is person segmentation plus an anatomical heuristic, not semantic neck
+  segmentation, a tissue scan, or physical sizing. Hair and clothing can still
+  obscure the true neck boundary and require physical-phone validation.
   Render-frame smoothing and submillimetre/rotation deadbands stabilize body
   pose; a 650ms pose timeout hides stale fits. Smoothed neck dimensions size
   both the model and its closed depth volume.
@@ -77,7 +78,9 @@ they are not a representation of a merchant's actual jewelry.
   front links are placed outside it, while the rear arc is hidden naturally.
   This replaces independently scaled model/mask volumes, which could erase
   disconnected chain fragments. Frontal chin observations bound collar height
-  against chest-colour misclassification; body yaw remains shoulder-driven.
+  against jaw/chest misidentification; body yaw remains shoulder-driven.
+  The observed neck section continues downward before the chest surface flares;
+  raycast regressions check projected side boundaries within two video pixels.
   Shader preparation happens before the rig is revealed. Link/pendant sizing
   changes never expand the collar away from the measured neck.
   Uploaded GLBs without this explicit rig remain rigid calibrated previews;
@@ -146,7 +149,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 50 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 54 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission
@@ -154,3 +157,10 @@ accept/deny, turning head to reveal each ear, changing camera, model material
 appearance, loss/reacquisition, portrait/landscape resizing, and sustained heat
 and battery use. A photograph proves inference integration, not real-ear accuracy.
 The SDK is pre-release; keep it pinned until upgrades pass the same checks.
+
+The contour update adds 54 passing frontend regressions, including actual
+mesh raycasts at the measured video row under yaw/roll and cropped mirrored
+video mapping. A full Chromium photographic fitting check with a collared
+astronaut portrait did not acquire a valid neck contour (the preview remained
+hidden); it is not evidence of successful human fitting. Validation on exposed
+necks and real phones is still required for anatomical accuracy.

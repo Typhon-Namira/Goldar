@@ -53,7 +53,7 @@ describe("neck depth occlusion", () => {
     expect(mask.material.colorWrite).toBe(false);
     const bounds = new Box3().setFromObject(mask);
     expect(bounds.max.y).toBeCloseTo(90);
-    expect(bounds.min.y).toBeCloseTo(-150);
+    expect(bounds.min.y).toBeCloseTo(-150 - 48 * 0.55);
     // Chest depth is now shared with the route, never an unrelated cutout.
     mask.geometry.dispose();
     mask.material.dispose();

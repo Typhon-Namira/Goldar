@@ -11,7 +11,7 @@ export function neckSurface(
   height: number,
   drop = 50,
 ): NeckSurface {
-  const r = Math.max(36, Math.min(68, radius));
+  const r = Math.max(24, Math.min(140, radius));
   return {
     radius: r,
     depth: r * 0.78,
@@ -21,13 +21,20 @@ export function neckSurface(
   };
 }
 export function bodySection(surface: NeckSurface, y: number) {
-  if (y >= 0) {
-    const taper = 1 - 0.1 * Math.max(0, Math.min(1, y / surface.height));
+  const base = surface.radius * 0.55;
+  if (y >= -base) {
+    const taper =
+      y >= 0
+        ? 1 - 0.1 * Math.min(1, y / surface.height)
+        : 1 + 0.04 * Math.min(1, -y / base);
     return { radius: surface.radius * taper, depth: surface.depth * taper };
   }
   return {
-    radius: Math.min(190, surface.radius + Math.min(-y, 130) * 1.05),
-    depth: surface.depth + Math.min(-y, 90) * 0.32,
+    radius: Math.min(
+      190,
+      surface.radius * 1.04 + Math.min(-y - base, 130) * 1.05,
+    ),
+    depth: surface.depth * 1.04 + Math.min(-y - base, 90) * 0.32,
   };
 }
 export function bodyFront(surface: NeckSurface, x: number, y: number) {
@@ -50,4 +57,25 @@ export function chainPoint(
   if (s > 0 && Math.abs(x) < bodySection(surface, y).radius)
     z = Math.max(z, bodyFront(surface, x, y) + surface.clearance);
   return [x, y, z];
+}
+
+export function bodyLevels(surface: NeckSurface) {
+  const base = surface.radius * 0.55;
+  return [
+    -base - 150,
+    -base - 120,
+    -base - 90,
+    -base - 70,
+    -base - 50,
+    -base - 30,
+    -base - 15,
+    -base,
+    -base * 0.65,
+    -base * 0.3,
+    0,
+    surface.height * 0.25,
+    surface.height * 0.5,
+    surface.height * 0.75,
+    surface.height,
+  ];
 }

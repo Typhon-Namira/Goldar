@@ -18,11 +18,11 @@ def load_schema(directory, filename, name):
     return module
 
 
-def annotate(source, schema, metadata_schema, mean, std):
+def annotate(source, schema, metadata_schema, mean, std, name="MediaPipe BlazePose Lite"):
     model = schema.ModelT.InitFromObj(schema.Model.GetRootAsModel(source, 0))
     weights = [bytes(b.data) if b.data is not None else b"" for b in model.buffers]
     meta = metadata_schema.ModelMetadataT()
-    meta.name = "MediaPipe BlazePose Lite"
+    meta.name = name
     meta.author = "Google"
     meta.license = "Apache-2.0"
     graph = metadata_schema.SubGraphMetadataT()

@@ -5,7 +5,12 @@ import {
   Mesh,
   MeshBasicMaterial,
 } from "three";
-import { neckSurface, bodySection, type NeckSurface } from "./neck-surface";
+import {
+  neckSurface,
+  bodySection,
+  bodyLevels,
+  type NeckSurface,
+} from "./neck-surface";
 const SIDES = 64,
   ROWS = 14;
 export function createNeckOccluder(): Mesh<BufferGeometry, MeshBasicMaterial> {
@@ -55,23 +60,7 @@ export function updateNeckOccluder(
   if (mesh.userData.surfaceKey === key) return;
   mesh.userData.surfaceKey = key;
   const position = mesh.geometry.getAttribute("position") as BufferAttribute;
-  const levels = [
-    -150,
-    -125,
-    -100,
-    -80,
-    -60,
-    -40,
-    -25,
-    -15,
-    -8,
-    -4,
-    0,
-    surface.height * 0.25,
-    surface.height * 0.5,
-    surface.height * 0.75,
-    surface.height,
-  ];
+  const levels = bodyLevels(surface);
   for (let row = 0; row <= ROWS; row++) {
     const y = levels[row],
       section = bodySection(surface, y);
@@ -86,7 +75,7 @@ export function updateNeckOccluder(
     }
   }
   const count = (ROWS + 1) * (SIDES + 1);
-  position.setXYZ(count, 0, -150, 0);
+  position.setXYZ(count, 0, levels[0], 0);
   position.setXYZ(count + 1, 0, surface.height, 0);
   position.needsUpdate = true;
   mesh.geometry.computeBoundingSphere();

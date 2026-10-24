@@ -42,3 +42,24 @@ python scripts/repack-pose-model.py --source-dir /path/to/extracted/package \
 ```
 
 Archive SHA256: `6b2ae41ee1ea77684c183ad10b6c10c5a9ae8704f8532ae1db30cf6d1dfe5cfb`.
+
+
+The additional `selfie_segmenter.tflite` comes from Google's Apache-2.0
+`@mediapipe/selfie_segmentation@0.1.1675465747` npm package. We retain its
+weights and add Tasks input normalization metadata (mean 0, std 255).
+It runs with the CPU ImageSegmenter in the same bounded worker. Only derived
+landmarks and contour coordinates leave the worker; camera frames remain local.
+The bundled Apache license also covers this model.
+
+Reproduce with the same schema files and Python dependencies above:
+
+```bash
+npm pack @mediapipe/selfie_segmentation@0.1.1675465747
+# Extract the archive, then:
+python scripts/repack-selfie-model.py --source /path/to/package/selfie_segmentation.tflite \
+  --schema-dir /path/to/tensorflow_lite_support/metadata \
+  --output public/models/tracking/selfie_segmenter.tflite
+```
+
+Normalized model SHA256:
+`0859a70e2e3e9ab40f1dced1c93ee2cdf8fb43abffe7a010408dd067c7158e98`.

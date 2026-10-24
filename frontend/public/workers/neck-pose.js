@@ -1,10 +1,8 @@
-/* MediaPipe inference runs off the camera/render thread. */
+/* Shared-camera CPU pose and person silhouette, off the render thread. */
 var exports = {};
 importScripts("/vendor/mediapipe/vision_bundle.js");
 importScripts("/workers/neck-contour.js");
-let tracker;
-const canvas = new OffscreenCanvas(384, 384);
-const pixels = canvas.getContext("2d", { willReadFrequently: true });
+let tracker, segmenter;
 self.onmessage = async ({ data }) => {
   if (data.type === "init") {
     try {
@@ -24,39 +22,51 @@ self.onmessage = async ({ data }) => {
         minTrackingConfidence: 0.5,
         outputSegmentationMasks: false,
       });
+      segmenter = await exports.ImageSegmenter.createFromOptions(files, {
+        baseOptions: {
+          modelAssetPath: "/models/tracking/selfie_segmenter.tflite",
+          delegate: "CPU",
+        },
+        canvas: new OffscreenCanvas(384, 384),
+        runningMode: "VIDEO",
+        outputCategoryMask: true,
+        outputConfidenceMasks: false,
+      });
       self.postMessage({ type: "ready" });
     } catch (error) {
       self.postMessage({ type: "error", message: String(error) });
     }
   } else if (data.type === "frame") {
+    let pose;
     try {
-      const result = tracker.detectForVideo(data.frame, data.time);
-      const points = result.landmarks[0] || [];
-      const mask = result.segmentationMasks?.[0];
-      if (canvas.width !== data.frame.width) canvas.width = data.frame.width;
-      if (canvas.height !== data.frame.height)
-        canvas.height = data.frame.height;
-      pixels.drawImage(data.frame, 0, 0);
-      const image = pixels.getImageData(0, 0, canvas.width, canvas.height);
-      const person = mask
-        ? {
-            values: mask.getAsFloat32Array(),
-            width: mask.width,
-            height: mask.height,
-          }
-        : null;
-      const neck = self.findNeckContour(
-        points,
-        image.data,
-        canvas.width,
-        canvas.height,
-        person,
-      );
-      self.postMessage({ type: "pose", points, neck, time: data.time });
-      result.close();
+      pose = tracker.detectForVideo(data.frame, data.time);
+      const points = pose.landmarks[0] || [];
+      // Consume the borrowed mask inside the callback; only coordinates leave
+      // the worker. No confidence-mask clone or image upload is necessary.
+      segmenter.segmentForVideo(data.frame, data.time, (result) => {
+        const mask = result.categoryMask;
+        const person = mask
+          ? {
+              width: mask.width,
+              height: mask.height,
+              values: mask.getAsUint8Array(),
+              category: true,
+            }
+          : null;
+        const neck = self.findNeckContour(
+          points,
+          null,
+          data.frame.width,
+          data.frame.height,
+          person,
+          data.region,
+        );
+        self.postMessage({ type: "pose", points, neck, time: data.time });
+      });
     } catch (error) {
       self.postMessage({ type: "error", message: String(error) });
     } finally {
+      pose?.close();
       data.frame.close();
     }
   }

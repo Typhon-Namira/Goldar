@@ -2,7 +2,7 @@ import { NecklaceRig } from "./necklace-rig";
 import { neckSurface } from "./neck-surface";
 import { StableNeckFrame } from "./body-stability";
 import { BodyPoseTracker } from "./body-pose";
-import { fitNeck, type NeckFit } from "./neck-fit";
+import { fitNeck, videoPoint, type NeckFit } from "./neck-fit";
 import { createNeckOccluder, updateNeckOccluder } from "./neck-occlusion";
 import { LobeStabilizer } from "./stabilization";
 import { LobeSurface } from "./ear-occlusion";
@@ -224,6 +224,22 @@ export class FaceEngine {
         },
         (message) => {
           this.bodyError = message;
+        },
+        (width, height) => {
+          if (
+            !this.faceChin ||
+            !this.sceneCamera ||
+            performance.now() - this.lastSeen > 350
+          )
+            return null;
+          const point = videoPoint(
+            this.faceChin,
+            { width, height },
+            { width: this.canvas.width, height: this.canvas.height },
+            this.sceneCamera,
+            this.facing === "front",
+          );
+          return point.y > 0 && point.y < 1 ? { chinY: point.y } : null;
         },
       );
       this.root.add(this.occluder);
@@ -542,7 +558,7 @@ export class FaceEngine {
     if (this.neckDepth) updateNeckOccluder(this.neckDepth, surface);
     this.left.visible = true;
     this.neckRoot.visible = true;
-    this.status("Necklace preview · shoulders tracked");
+    this.status("Necklace preview · neck contour tracked");
   }
   dispose() {
     if (this.disposed) return;

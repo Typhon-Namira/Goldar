@@ -28,6 +28,10 @@ export class BodyPoseTracker {
   constructor(
     private result: (pose: BodyPose) => void,
     private failed: (message: string) => void,
+    private reference?: (
+      width: number,
+      height: number,
+    ) => { chinY: number } | null,
   ) {}
   start(video: HTMLVideoElement) {
     this.video = video;
@@ -106,7 +110,12 @@ export class BodyPoseTracker {
         10000,
       );
       this.worker!.postMessage(
-        { type: "frame", frame, time: performance.now() },
+        {
+          type: "frame",
+          frame,
+          time: performance.now(),
+          region: this.reference?.(video.videoWidth, video.videoHeight) ?? null,
+        },
         [frame],
       );
     } catch {

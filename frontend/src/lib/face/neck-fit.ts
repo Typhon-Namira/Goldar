@@ -1,3 +1,4 @@
+import { refineNeckProjection } from "./neck-projection";
 import { Matrix4, PerspectiveCamera, Quaternion, Vector3 } from "three";
 import type { BodyPoint, BodyPose } from "./body-pose";
 export type NeckFit = {
@@ -27,6 +28,24 @@ export function cameraPoint(
   const direction = new Vector3(x, y, 0).unproject(camera).sub(origin);
   const forward = camera.getWorldDirection(new Vector3());
   return origin.addScaledVector(direction, depth / direction.dot(forward));
+}
+export function videoPoint(
+  point: Vector3,
+  pose: Pick<BodyPose, "width" | "height">,
+  viewport: { width: number; height: number },
+  camera: PerspectiveCamera,
+  mirrored: boolean,
+) {
+  const ndc = point.clone().project(camera);
+  const cover = Math.max(
+    viewport.width / pose.width,
+    viewport.height / pose.height,
+  );
+  const u = 0.5 + (ndc.x * viewport.width) / (2 * pose.width * cover);
+  return {
+    x: mirrored ? 1 - u : u,
+    y: 0.5 - (ndc.y * viewport.height) / (2 * pose.height * cover),
+  };
 }
 export function fitNeck(
   pose: BodyPose,
@@ -106,20 +125,23 @@ export function fitNeck(
       depth,
       mirrored,
     );
-    radius = Math.max(36, Math.min(68, nl.distanceTo(nr) / (2 * mm)));
-    const mid = nl.add(nr).multiplyScalar(0.5);
-    // The skin section locates the actual neck, rather than a fixed offset
-    // from shoulder joints. Stay within a plausible body-relative correction.
-    const measuredBase = mid.clone().addScaledVector(up, -radius * 0.55 * mm);
-    const correction = measuredBase.sub(position);
-    const vertical = Math.max(-10 * mm, Math.min(65 * mm, correction.dot(up)));
-    const horizontal = Math.max(-15 * mm, Math.min(15 * mm, correction.dot(x)));
-    position.addScaledVector(up, vertical).addScaledVector(x, horizontal);
-    height = Math.max(
-      45,
-      Math.min(110, (mid.sub(position).dot(up) / mm) * 1.4),
+    const cameraRight = new Vector3(1, 0, 0).applyQuaternion(
+      camera.getWorldQuaternion(new Quaternion()),
     );
+    const projection = Math.max(
+      0.5,
+      Math.hypot(x.dot(cameraRight), 0.78 * z.dot(cameraRight)),
+    );
+    radius = Math.max(
+      24,
+      Math.min(140, nl.distanceTo(nr) / (2 * mm * projection)),
+    );
+    // Bind the collar to this observed row, not to a lower inferred chest row.
+    const mid = nl.add(nr).multiplyScalar(0.5);
+    position.copy(mid);
+    height = 60;
   }
+  let refineObservedRow = true;
   if (chin) {
     const origin = camera.getWorldPosition(new Vector3());
     const direction = chin.clone().sub(origin);
@@ -127,18 +149,51 @@ export function fitNeck(
     if (denominator > 0) {
       const chinPlane = origin.addScaledVector(direction, depth / denominator);
       const distance = chinPlane.sub(position).dot(up) / mm;
-      // RGB can include exposed chest. The measured collar must remain within
+      // A silhouette can include the chest. The collar must remain within
       // the anatomical neck band below the visible chin, never on the chest.
-      const bounded = Math.max(radius * 0.85, Math.min(radius * 1.7, distance));
+      const bounded = Math.max(
+        20,
+        Math.min(Math.max(40, Math.min(110, radius * 1.7)), distance),
+      );
+      if (Math.abs(distance - bounded) > 2) refineObservedRow = false;
       position.addScaledVector(up, (distance - bounded) * mm);
       height = Math.max(45, Math.min(110, bounded + 4));
     }
   }
+  const rotation = new Quaternion().setFromRotationMatrix(
+    new Matrix4().makeBasis(x, up, z),
+  );
+  if (pose.neck && refineObservedRow) {
+    const nl = cameraPoint(
+      { x: pose.neck.left, y: pose.neck.y, z: 0 },
+      pose,
+      viewport,
+      camera,
+      depth,
+      mirrored,
+    );
+    const nr = cameraPoint(
+      { x: pose.neck.right, y: pose.neck.y, z: 0 },
+      pose,
+      viewport,
+      camera,
+      depth,
+      mirrored,
+    );
+    radius = refineNeckProjection(
+      position,
+      rotation,
+      mm,
+      radius,
+      height,
+      camera,
+      nl,
+      nr,
+    );
+  }
   return {
     position,
-    rotation: new Quaternion().setFromRotationMatrix(
-      new Matrix4().makeBasis(x, up, z),
-    ),
+    rotation,
     mm,
     radius,
     height,

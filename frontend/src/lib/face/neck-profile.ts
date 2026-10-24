@@ -1,5 +1,5 @@
 import type { BodyPose } from "./body-pose";
-/** Keep this person's neck-to-shoulder proportions through brief colour/skin
+/** Keep this person's neck-to-shoulder proportions through brief silhouette
  * occlusion; move the cached outline with the current body, never the head. */
 export class NeckProfileMemory {
   private profile: { left: number; right: number; y: number } | null = null;

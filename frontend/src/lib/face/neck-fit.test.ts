@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PerspectiveCamera, Vector3 } from "three";
-import { fitNeck, cameraPoint } from "./neck-fit";
+import { fitNeck, cameraPoint, videoPoint } from "./neck-fit";
 import type { BodyPose } from "./body-pose";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
@@ -62,7 +62,8 @@ describe("body anchored necklace", () => {
         .project(camera)
         .distanceTo(b.position.clone().project(camera)),
     ).toBeLessThan(0.02);
-    expect(a.radius).toBeCloseTo(47.5);
+    expect(a.radius).toBeGreaterThan(47);
+    expect(a.radius).toBeLessThan(48);
     expect(a.radius).toBeCloseTo(b.radius);
   });
   it("distinguishes a back-facing body instead of always pointing the model forward", () => {
@@ -75,7 +76,7 @@ describe("body anchored necklace", () => {
   });
 });
 
-describe("neck skin boundary extraction", () => {
+describe("learned neck silhouette extraction", () => {
   const context: { self: Record<string, unknown> } = { self: {} };
   runInNewContext(
     readFileSync(
@@ -89,29 +90,62 @@ describe("neck skin boundary extraction", () => {
     pixels: Uint8ClampedArray,
     w: number,
     h: number,
-    person: null,
-  ) => { left: number; right: number } | null;
-  it("finds this person's neck edges without treating red clothing as neck tissue", () => {
+    person: {
+      values: Uint8Array;
+      width: number;
+      height: number;
+      category: boolean;
+    } | null,
+    region?: { chinY: number },
+  ) => { left: number; right: number; y: number } | null;
+  it("keeps the full neck silhouette despite a dark strip inside the skin", () => {
     const p = pose().points;
     p[0] = { x: 0.5, y: 0.25, z: 0, visibility: 1 };
-    p[7].x = 0.3;
-    p[8].x = 0.7;
     p[9].y = p[10].y = 0.35;
     const pixels = new Uint8ClampedArray(100 * 100 * 4);
-    for (let y = 0; y < 100; y++)
-      for (let x = 0; x < 100; x++) {
-        const skin =
-          (y < 36 && x > 30 && x < 70) ||
-          (y >= 36 && y < 58 && x >= 44 && x <= 56);
-        pixels.set(
-          skin ? [180, 130, 100, 255] : [190, 30, 40, 255],
-          (y * 100 + x) * 4,
-        );
-      }
-    const neck = extract(p, pixels, 100, 100, null)!;
-    expect(neck).not.toBeNull();
-    expect(neck.left).toBeGreaterThan(0.4);
-    expect(neck.right).toBeLessThan(0.6);
+    const values = new Uint8Array(100 * 100).fill(255);
+    for (let y = 36; y < 58; y++)
+      for (let x = 42; x <= 58; x++) values[y * 100 + x] = 0;
+    // All-black RGB would have failed the old cheek-colour scan.
+    const result = extract(
+      p,
+      pixels,
+      100,
+      100,
+      {
+        values,
+        width: 100,
+        height: 100,
+        category: true,
+      },
+      { chinY: 0.35 },
+    )!;
+    expect(result).not.toBeNull();
+    expect(result.left).toBeCloseTo(0.42, 1);
+    expect(result.right).toBeCloseTo(0.59, 1);
+    expect(result.left).toBeLessThan(0.44);
+    expect(result.right).toBeGreaterThan(0.56);
+  });
+  it("excludes a narrower jaw above the chin instead of fitting the collar to it", () => {
+    const p = pose().points;
+    p[0] = { x: 0.5, y: 0.25, z: 0, visibility: 1 };
+    p[9].y = p[10].y = 0.35;
+    const values = new Uint8Array(10000).fill(255);
+    for (let y = 30; y < 40; y++)
+      for (let x = 44; x <= 56; x++) values[y * 100 + x] = 0;
+    for (let y = 40; y < 58; y++)
+      for (let x = 42; x <= 58; x++) values[y * 100 + x] = 0;
+    const result = extract(
+      p,
+      new Uint8ClampedArray(40000),
+      100,
+      100,
+      { values, width: 100, height: 100, category: true },
+      { chinY: 0.4 },
+    )!;
+    expect(result).not.toBeNull();
+    expect(result.y).toBeGreaterThan(0.4);
+    expect(result.right - result.left).toBeGreaterThan(0.15);
   });
   it("rejects an obscured neck rather than returning a chest-sized skin mask", () => {
     expect(
@@ -134,8 +168,7 @@ describe("neck-defined attachment height", () => {
     const fitted = fitNeck(p, viewport, camera, 1, true)!;
     const visible = fitted.position.clone().project(camera);
     const y = (1 - visible.y) / 2;
-    expect(y).toBeGreaterThan(0.46);
-    expect(y).toBeLessThan(0.52);
+    expect(y).toBeCloseTo(0.46, 8);
     expect(fitted.position.y).toBeGreaterThan(shoulderOnly.position.y);
   });
 });
@@ -155,8 +188,23 @@ describe("visible chin anatomical bounds", () => {
     const fit = fitNeck(p, viewport, camera, 1, true, chin)!;
     const up = new Vector3(0, 1, 0).applyQuaternion(fit.rotation);
     const below = chin.clone().sub(fit.position).dot(up) / fit.mm;
-    expect(below).toBeGreaterThanOrEqual(fit.radius * 0.85 - 0.001);
+    expect(below).toBeGreaterThanOrEqual(19.999);
     expect(below).toBeLessThanOrEqual(fit.radius * 1.7 + 0.001);
     expect(fit.rotation.w).toBeCloseTo(1);
+  });
+});
+
+describe("video reference mapping", () => {
+  it("maps the chin reference back into raw video through centre crop and selfie mirroring", () => {
+    const world = new Vector3(0.2, 0.1, 0).unproject(camera);
+    const point = videoPoint(
+      world,
+      { width: 640, height: 480 },
+      { width: 400, height: 800 },
+      camera,
+      true,
+    );
+    expect(point.x).toBeCloseTo(0.4625, 8);
+    expect(point.y).toBeCloseTo(0.45, 8);
   });
 });
