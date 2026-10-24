@@ -71,8 +71,17 @@ they are not a representation of a merchant's actual jewelry.
   Render-frame smoothing and submillimetre/rotation deadbands stabilize body
   pose; a 650ms pose timeout hides stale fits. Smoothed neck dimensions size
   both the model and its closed depth volume.
-  The neck mask starts at the measured body base, never down the chest: rear
-  chain is hidden by the neck, while the front drape below the base remains.
+  The built-in Emerald Halo sample uses an explicit anatomical rig: individual
+  instanced gold links follow an arc-length sampled route around one shared
+  neck/upper-chest surface. The same surface generates the closed depth mesh;
+  front links are placed outside it, while the rear arc is hidden naturally.
+  This replaces independently scaled model/mask volumes, which could erase
+  disconnected chain fragments. Frontal chin observations bound collar height
+  against chest-colour misclassification; body yaw remains shoulder-driven.
+  Shader preparation happens before the rig is revealed. Link/pendant sizing
+  changes never expand the collar away from the measured neck.
+  Uploaded GLBs without this explicit rig remain rigid calibrated previews;
+  arbitrary merchant geometry is not automatically skinned or simulated.
   A missing/low-confidence shoulder hides the preview after a short timeout
   and asks the user to frame both shoulders instead of reverting to chin fit.
   Pose inference runs on CPU inside a dedicated worker, at most one 384px
@@ -84,6 +93,11 @@ they are not a representation of a merchant's actual jewelry.
   body-fit baseline; custom offsets adjust relative to that baseline. Original
   unchanged 180mm sample defaults still resolve compatibly. Width/depth adapt
   visually to the neck: this is not a physical measurement or cloth simulation.
+  For the rigged sample, height controls front drape; XYZ offsets remain active,
+  while authored origin/orientation replace generic bounding-box anchor/rotation.
+  The original asset contains linked gold, a pear-cut emerald, diamond halo,
+  basket/prongs, bail and rear clasp. It uses glTF GPU instancing for link/stone
+  reuse and requires a compatible glTF viewer (the bundled Three.js loader is tested).
   Body orientation supports rear arcs when shoulders remain tracked; physical
   front/side/back acceptance on iOS/Android remains required.
 - Model height: approximate millimetres converted relative to an assumed 160mm
@@ -132,7 +146,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 43 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 50 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission

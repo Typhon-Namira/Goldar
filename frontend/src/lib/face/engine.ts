@@ -1,7 +1,9 @@
+import { NecklaceRig } from "./necklace-rig";
+import { neckSurface } from "./neck-surface";
 import { StableNeckFrame } from "./body-stability";
 import { BodyPoseTracker } from "./body-pose";
 import { fitNeck, type NeckFit } from "./neck-fit";
-import { createNeckOccluder } from "./neck-occlusion";
+import { createNeckOccluder, updateNeckOccluder } from "./neck-occlusion";
 import { LobeStabilizer } from "./stabilization";
 import { LobeSurface } from "./ear-occlusion";
 import { validPoint, attachmentPlan, EarLobeTracking } from "./attachments";
@@ -56,7 +58,11 @@ export class FaceEngine {
   private right = new T.Group();
   private lobeFilters = [new LobeStabilizer(), new LobeStabilizer()];
   private lobeSurfaces: LobeSurface[] = [];
-  private neckDepth: T.Mesh | null = null;
+  private neckDepth: ReturnType<typeof createNeckOccluder> | null = null;
+  private necklaceRig: NecklaceRig | null = null;
+  private materialsReady = false;
+  private faceChin: T.Vector3 | null = null;
+  private neckAnchorCorrection = 0;
   private neckRoot = new T.Group();
   private body: BodyPoseTracker | null = null;
   private neckFit: NeckFit | null = null;
@@ -64,8 +70,6 @@ export class FaceEngine {
   private bodyStability = new StableNeckFrame();
   private sceneCamera: T.PerspectiveCamera | null = null;
   private facing: "front" | "back" = "front";
-  private neckRadius = 48;
-  private neckHeight = 90;
   private necklaceHalfWidth = 58;
   private occluder = new T.Mesh(
     new T.BufferGeometry(),
@@ -123,7 +127,11 @@ export class FaceEngine {
       gltf = await new GLTFLoader()
         .setDRACOLoader(draco)
         .setMeshoptDecoder(MeshoptDecoder)
-        .loadAsync(this.product.glb_url);
+        .loadAsync(
+          this.product.glb_url === "/models/sample-necklace.glb"
+            ? this.product.glb_url + "?v=emerald-halo-rig2"
+            : this.product.glb_url,
+        );
     } finally {
       draco.dispose();
     }
@@ -133,7 +141,13 @@ export class FaceEngine {
       return;
     }
     this.model = gltf.scene;
-    this.left.add(prepareJewelry(clone(gltf.scene), this.calibration));
+    if (
+      this.product.category === "necklace" &&
+      gltf.scene.userData.goldarNecklaceRig === 2
+    ) {
+      this.necklaceRig = new NecklaceRig(gltf.scene);
+      this.left.add(this.necklaceRig.root);
+    } else this.left.add(prepareJewelry(clone(gltf.scene), this.calibration));
     if (this.product.category === "earring")
       this.right.add(prepareJewelry(clone(gltf.scene), this.calibration));
     if (this.product.category === "earring") {
@@ -143,8 +157,13 @@ export class FaceEngine {
       });
     }
     if (this.product.category === "necklace") {
-      const bounds = new T.Box3().setFromObject(this.left);
-      this.necklaceHalfWidth = Math.max(1, (bounds.max.x - bounds.min.x) * 80);
+      if (!this.necklaceRig) {
+        const bounds = new T.Box3().setFromObject(this.left);
+        this.necklaceHalfWidth = Math.max(
+          1,
+          (bounds.max.x - bounds.min.x) * 80,
+        );
+      }
       this.neckDepth = createNeckOccluder();
       this.neckRoot.name = "GoldarBodyNecklace";
       this.neckRoot.add(this.left, this.neckDepth);
@@ -160,14 +179,48 @@ export class FaceEngine {
               .applyMatrix4(camera.matrixWorldInverse);
             depth = Math.max(0.2, -view.z);
           }
-          const fit = fitNeck(
+          let fit = fitNeck(
             pose,
             { width: this.canvas.width, height: this.canvas.height },
             camera,
             depth,
             this.facing === "front",
           );
-          if (fit) this.neckFit = fit;
+          if (fit) {
+            const up = new T.Vector3(0, 1, 0).applyQuaternion(fit.rotation);
+            const view = camera
+              .getWorldPosition(new T.Vector3())
+              .sub(this.root.position)
+              .normalize();
+            const frontal =
+              new T.Vector3(0, 0, -1)
+                .applyQuaternion(this.root.quaternion)
+                .dot(view) > 0.9;
+            if (
+              this.faceChin &&
+              frontal &&
+              performance.now() - this.lastSeen < 350
+            ) {
+              const bounded = fitNeck(
+                pose,
+                { width: this.canvas.width, height: this.canvas.height },
+                camera,
+                depth,
+                this.facing === "front",
+                this.faceChin,
+              );
+              if (bounded) {
+                this.neckAnchorCorrection =
+                  bounded.position.clone().sub(fit.position).dot(up) / fit.mm;
+                fit = bounded;
+              }
+            } else
+              fit.position.addScaledVector(
+                up,
+                this.neckAnchorCorrection * fit.mm,
+              );
+            this.neckFit = fit;
+          }
         },
         (message) => {
           this.bodyError = message;
@@ -202,6 +255,18 @@ export class FaceEngine {
         const light = new T.DirectionalLight(0xffeddb, 2);
         light.position.set(1, 2, 3);
         scene.add(light, this.root, this.neckRoot);
+        if (this.necklaceRig) {
+          void renderer
+            .compileAsync(this.neckRoot, camera, scene)
+            .then(() => {
+              if (!this.disposed) this.materialsReady = true;
+            })
+            .catch(() => {
+              if (!this.disposed)
+                this.bodyError =
+                  "Unable to prepare the necklace materials. Reload to retry.";
+            });
+        }
         this.status(
           this.body
             ? "Keep your neck and both shoulders in view."
@@ -245,6 +310,7 @@ export class FaceEngine {
             if ((e.detail as { id: number }).id === this.faceId) {
               this.root.visible = false;
               this.faceId = null;
+              this.faceChin = null;
               if (!this.body)
                 this.status("Face lost. Look towards the camera.");
             }
@@ -317,6 +383,10 @@ export class FaceEngine {
     this.root.position.set(t.position.x, t.position.y, t.position.z);
     this.root.quaternion.set(q.x, q.y, q.z, q.w).normalize();
     this.root.scale.setScalar(t.scale);
+    const chin = face.attachmentPoints?.chin?.position;
+    this.faceChin = validPoint(chin)
+      ? this.root.localToWorld(new T.Vector3(chin.x, chin.y, chin.z))
+      : null;
     const width =
       Number.isFinite(t.scaledWidth) && t.scaledWidth > 0 ? t.scaledWidth : 1;
     const offset = new T.Vector3(...this.calibration.offset_mm).multiplyScalar(
@@ -423,6 +493,11 @@ export class FaceEngine {
   private updateBody() {
     if (!this.body || this.disposed) return;
     const now = performance.now();
+    if (this.necklaceRig && !this.materialsReady && !this.bodyError) {
+      this.neckRoot.visible = false;
+      this.status("Preparing the necklace finish…");
+      return;
+    }
     const target = this.neckFit;
     if (!target || now - target.time > 650 || this.bodyError) {
       this.neckRoot.visible = false;
@@ -439,30 +514,32 @@ export class FaceEngine {
     const baseline = defaultCalibration("necklace");
     this.left.position.set(
       this.calibration.offset_mm[0] - baseline.offset_mm[0],
-      30 + this.calibration.offset_mm[1] - baseline.offset_mm[1],
+      (this.necklaceRig ? 0 : 30) +
+        this.calibration.offset_mm[1] -
+        baseline.offset_mm[1],
       this.calibration.offset_mm[2] - baseline.offset_mm[2],
     );
-    this.neckRadius = fit.radius;
-    const horizontalFit = T.MathUtils.clamp(
-      (this.neckRadius + 4) / this.necklaceHalfWidth,
-      0.65,
-      1.5,
+    const surface = neckSurface(
+      fit.radius,
+      fit.height,
+      ((50 * this.calibration.height_mm) / 85) * this.fit,
     );
-    this.left.scale.set(
-      160 * this.fit * horizontalFit,
-      160 * this.fit,
-      160 * this.fit * horizontalFit,
-    );
-    if (this.neckDepth) {
-      this.neckHeight = fit.height;
-      const heightRatio = (this.neckHeight + 12) / 110;
-      this.neckDepth.scale.set(
-        this.neckRadius / 48,
-        heightRatio,
-        this.neckRadius / 48,
+    if (this.necklaceRig) {
+      this.left.scale.setScalar(1);
+      this.necklaceRig.update(surface, this.fit);
+    } else {
+      const horizontalFit = T.MathUtils.clamp(
+        (fit.radius + 4) / this.necklaceHalfWidth,
+        0.65,
+        1.5,
       );
-      this.neckDepth.position.y = -12 + 12 * heightRatio;
+      this.left.scale.set(
+        160 * this.fit * horizontalFit,
+        160 * this.fit,
+        160 * this.fit * horizontalFit,
+      );
     }
+    if (this.neckDepth) updateNeckOccluder(this.neckDepth, surface);
     this.left.visible = true;
     this.neckRoot.visible = true;
     this.status("Necklace preview · shoulders tracked");

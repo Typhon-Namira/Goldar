@@ -52,15 +52,9 @@ describe("neck depth occlusion", () => {
     expect(hit.point.z).toBeLessThan(42);
     expect(mask.material.colorWrite).toBe(false);
     const bounds = new Box3().setFromObject(mask);
-    expect(bounds.max.y).toBeCloseTo(98);
-    expect(bounds.min.y).toBeCloseTo(-12);
-    // Chest-level front chain is never erased by a neck-shaped mask.
-    expect(
-      new Raycaster(
-        new Vector3(0, -40, 200),
-        new Vector3(0, 0, -1),
-      ).intersectObject(mask),
-    ).toHaveLength(0);
+    expect(bounds.max.y).toBeCloseTo(90);
+    expect(bounds.min.y).toBeCloseTo(-150);
+    // Chest depth is now shared with the route, never an unrelated cutout.
     mask.geometry.dispose();
     mask.material.dispose();
   });
@@ -82,13 +76,25 @@ describe("neck depth occlusion", () => {
     );
     const jsonLength = glb.readUInt32LE(12);
     const document = JSON.parse(glb.subarray(20, 20 + jsonLength).toString());
-    const chain =
-      document.accessors[document.meshes[0].primitives[0].attributes.POSITION];
-    expect(chain.max[2] - chain.min[2]).toBeGreaterThan(0.08);
-    expect(chain.max[1] - chain.min[1]).toBeGreaterThan(0.06);
-    const gem =
-      document.accessors[document.meshes[0].primitives[1].attributes.POSITION];
-    expect(gem.min[2]).toBeGreaterThan(0.03);
-    expect(gem.max[1]).toBeGreaterThan(chain.min[1]);
+    expect(document.scenes[0].extras.goldarNecklaceRig).toBe(2);
+    const chain = document.nodes.find(
+      (node: { name: string }) => node.name === "ChainLinks",
+    );
+    const translations =
+      document.accessors[
+        chain.extensions.EXT_mesh_gpu_instancing.attributes.TRANSLATION
+      ];
+    expect(translations.max[2] - translations.min[2]).toBeGreaterThan(0.08);
+    expect(translations.max[1] - translations.min[1]).toBeGreaterThan(0.055);
+    expect(
+      document.nodes.some(
+        (node: { name: string }) => node.name === "PearCutEmerald",
+      ),
+    ).toBe(true);
+    expect(
+      document.nodes.some(
+        (node: { name: string }) => node.name === "DiamondHalo",
+      ),
+    ).toBe(true);
   });
 });

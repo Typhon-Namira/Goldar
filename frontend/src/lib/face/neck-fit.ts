@@ -34,6 +34,7 @@ export function fitNeck(
   camera: PerspectiveCamera,
   depth: number,
   mirrored: boolean,
+  chin?: Vector3,
 ): NeckFit | null {
   const valid = (p: BodyPoint | undefined): p is BodyPoint =>
     !!p &&
@@ -118,6 +119,20 @@ export function fitNeck(
       45,
       Math.min(110, (mid.sub(position).dot(up) / mm) * 1.4),
     );
+  }
+  if (chin) {
+    const origin = camera.getWorldPosition(new Vector3());
+    const direction = chin.clone().sub(origin);
+    const denominator = direction.dot(camera.getWorldDirection(new Vector3()));
+    if (denominator > 0) {
+      const chinPlane = origin.addScaledVector(direction, depth / denominator);
+      const distance = chinPlane.sub(position).dot(up) / mm;
+      // RGB can include exposed chest. The measured collar must remain within
+      // the anatomical neck band below the visible chin, never on the chest.
+      const bounded = Math.max(radius * 0.85, Math.min(radius * 1.7, distance));
+      position.addScaledVector(up, (distance - bounded) * mm);
+      height = Math.max(45, Math.min(110, bounded + 4));
+    }
   }
   return {
     position,

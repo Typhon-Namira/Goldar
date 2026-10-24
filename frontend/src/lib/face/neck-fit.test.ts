@@ -139,3 +139,24 @@ describe("neck-defined attachment height", () => {
     expect(fitted.position.y).toBeGreaterThan(shoulderOnly.position.y);
   });
 });
+
+describe("visible chin anatomical bounds", () => {
+  it("rejects a chest-level skin anchor without rotating the necklace with the head", () => {
+    const p = pose();
+    p.neck = { left: 0.45, right: 0.55, y: 0.72 };
+    const chin = cameraPoint(
+      { x: 0.5, y: 0.4, z: 0 },
+      p,
+      viewport,
+      camera,
+      1,
+      true,
+    );
+    const fit = fitNeck(p, viewport, camera, 1, true, chin)!;
+    const up = new Vector3(0, 1, 0).applyQuaternion(fit.rotation);
+    const below = chin.clone().sub(fit.position).dot(up) / fit.mm;
+    expect(below).toBeGreaterThanOrEqual(fit.radius * 0.85 - 0.001);
+    expect(below).toBeLessThanOrEqual(fit.radius * 1.7 + 0.001);
+    expect(fit.rotation.w).toBeCloseTo(1);
+  });
+});

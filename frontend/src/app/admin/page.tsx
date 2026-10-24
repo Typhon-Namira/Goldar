@@ -537,7 +537,9 @@ export default function Admin() {
                     setFaceConfig(defaultCalibration(productForm.category));
                   }}
                 >
-                  Use sample {productForm.category} model
+                  {productForm.category === "necklace"
+                    ? "Use Emerald Halo necklace model"
+                    : "Use sample earring model"}
                 </button>
                 <p className="muted">
                   Sample assets are for testing placement. Replace them with
