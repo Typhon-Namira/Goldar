@@ -157,7 +157,7 @@ export function fitNeck(
       // the anatomical neck band below the visible chin, never on the chest.
       const bounded = Math.max(
         20,
-        Math.min(Math.max(40, Math.min(110, radius * 1.7)), distance),
+        Math.min(Math.max(35, Math.min(65, radius * 0.9)), distance),
       );
       if (Math.abs(distance - bounded) > 2) refineObservedRow = false;
       position.addScaledVector(up, (distance - bounded) * mm);

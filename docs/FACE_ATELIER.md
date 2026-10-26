@@ -66,13 +66,15 @@ they are not a representation of a merchant's actual jewelry.
   neck edges. The measured section directly anchors the collar; projected
   depth-volume edges are refined against those same video coordinates instead
   of shifting an independent mask down onto the chest. Cached body-relative
-  proportions survive brief silhouette dropouts and reset after tracking loss.
-  A missing initial contour waits for a measurable neck rather than guessing.
+  proportions persist while the same body remains tracked, with median
+  silhouette filtering and reset on identity/body-gap/dimension changes.
+  Initial bootstrap requires an observed XR8 chin and confident shoulders;
+  mouth-based chin extrapolation is not used.
   This is person segmentation plus an anatomical heuristic, not semantic neck
   segmentation, a tissue scan, or physical sizing. Hair and clothing can still
   obscure the true neck boundary and require physical-phone validation.
   Render-frame smoothing and submillimetre/rotation deadbands stabilize body
-  pose; a 650ms pose timeout hides stale fits. Smoothed neck dimensions size
+  pose; a measured 650–1400ms expiry hides stale fits. Smoothed neck dimensions size
   both the model and its closed depth volume.
   The built-in Emerald Halo sample uses an explicit anatomical rig: individual
   instanced gold links follow an arc-length sampled route around one shared
@@ -161,7 +163,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 84 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 94 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission
@@ -188,8 +190,9 @@ is still required to judge real anatomical alignment.
 
 - Body results retain image-capture time, including bitmap creation latency;
   a delayed worker result cannot revive a necklace as a fresh observation.
-- Cached neck proportions expire 1.2 seconds after the last measured contour,
-  even if shoulders remain visible. Camera-dimension changes force acquisition.
+- Cached neck proportions remain valid during segmentation gaps while the
+  same body is tracked. A 1.2-second body gap, new face identity or camera
+  dimension change forces acquisition; old in-flight observations are rejected.
 - Chin-to-shoulder scan margins use camera-frame aspect ratio, not the square
   segmentation tensor's aspect.
 - Camera failure status and pipeline exceptions hide both jewelry roots and
@@ -215,3 +218,10 @@ expiry now adapts to measured inference delay/cadence, bounded at 1.4 seconds,
 while retaining capture timestamps. See INTERACTIVE_WINDOW.md for current
 startup, independent hand tracking and icon-only UI. Earlier chronological
 audit notes describe the prior behavior and its former 650ms timeout.
+
+The responsive-fitting revision removes mouth-extrapolated bootstrap and the
+1.2-second contour-only expiry. Measured proportions now persist while the
+same body remains tracked, with explicit new-face/dimension/body-gap reset and
+median silhouette filtering. The body fit stays on a fixed camera plane;
+frontal chin bounds keep the collar within 20–65mm below the chin. These changes
+supersede the earlier fallback and contour-expiry audit notes above.

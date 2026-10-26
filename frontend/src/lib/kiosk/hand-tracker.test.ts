@@ -19,7 +19,7 @@ it('turns independent hand-worker results into a swipe on the existing video wit
  for(let i=0;i<3;i++){
   await vi.advanceTimersByTimeAsync(90);
   const frame=worker.postMessage.mock.calls.at(-1)![0];
-  worker.send({type:'hands',time:frame.time,landmarks:[Array.from({length:21},()=>({x:.3+i*.05,y:.4}))]});
+  worker.send({type:'hands',time:frame.time,landmarks:[Array.from({length:21},(_,j)=>({x:.3+i*.05+(j%5)*.015,y:.4+Math.floor(j/5)*.02}))]});
   v.currentTime++;
  }
  expect(swipe).toHaveBeenCalledTimes(1);expect(swipe).toHaveBeenCalledWith(1);expect(failed).not.toHaveBeenCalled();

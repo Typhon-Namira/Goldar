@@ -55,8 +55,10 @@ self.findNeckContour = (points, _pixels, imageWidth, imageHeight, person, region
     if (span > shoulderWidth * 0.19 && span < shoulderWidth * 0.56)
       candidates.push({ left, right, y, width: span });
   }
-  candidates.sort((a, b) => a.width - b.width);
+  // Stay at the upper-neck contact row. Picking the narrowest row anywhere
+  // in the band made collar height jump between neck and exposed chest.
+  candidates.sort((a, b) => a.y - b.y);
   return candidates.length >= 3
-    ? candidates[Math.floor(candidates.length * 0.25)]
+    ? candidates[0]
     : null;
 };

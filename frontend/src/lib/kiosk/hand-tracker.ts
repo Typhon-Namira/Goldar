@@ -8,6 +8,7 @@ export class HandSwipeTracker {
   private ready=false;
   private busy=false;
   private previous=-1;
+  private sceneUntil=-Infinity;
   private detector=new HandSwipeDetector();
   constructor(private swipe:(direction:SwipeDirection)=>void,private failed:()=>void,private mirrored:boolean){}
   start(video:HTMLVideoElement){
@@ -21,15 +22,17 @@ export class HandSwipeTracker {
         if(data.type==='ready')this.ready=true;
         else if(data.type==='hands'){
           this.busy=false;
-          if(performance.now()-data.time<800){
+          if(data.sceneChanged){this.detector=new HandSwipeDetector();this.sceneUntil=data.time+180;}
+          if(performance.now()-data.time<800&&data.time>=this.sceneUntil){
             const direction=this.detector.update(data.landmarks,data.time,this.mirrored);
             if(direction)this.swipe(direction);
           }
+          if(!this.disposed)void this.capture(video);
         }else if(data.type==='error')this.fail();
       };
       this.worker.postMessage({type:'init'});
       this.deadline=setTimeout(()=>this.fail(),30000);
-      this.timer=setInterval(()=>void this.capture(video),90);
+      this.timer=setInterval(()=>void this.capture(video),33);
     }catch{this.fail();}
   }
   private async capture(video:HTMLVideoElement){

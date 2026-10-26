@@ -62,3 +62,15 @@ describe("shared-camera body inference lifecycle", () => {
     expect(WorkerStub.current.terminate).toHaveBeenCalledTimes(1);
   });
 });
+
+it('discards an in-flight observation belonging to the previous visitor after profile reset',async()=>{
+ vi.stubGlobal('createImageBitmap',vi.fn().mockResolvedValue({close:vi.fn()}));
+ const result=vi.fn(),tracker=new BodyPoseTracker(result,vi.fn()),v=video();
+ tracker.start(v);const worker=WorkerStub.current;worker.send({type:'ready'});
+ await vi.advanceTimersByTimeAsync(110);
+ tracker.resetProfile();worker.send({type:'pose',points:[],neck:null,time:110});
+ expect(result).not.toHaveBeenCalled();
+ v.currentTime++;await vi.advanceTimersByTimeAsync(110);
+ worker.send({type:'pose',points:[],neck:null,time:220});
+ expect(result).toHaveBeenCalledTimes(1);tracker.dispose();
+});

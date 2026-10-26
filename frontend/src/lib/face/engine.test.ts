@@ -4,11 +4,12 @@ import type { Product } from "../api";
 import type { BodyPose } from "./body-pose";
 import type { PipelineModule, FaceData } from "./types";
 import { FaceEngine } from "./engine";
-const hooks = vi.hoisted(() => ({ pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn(), block: null as Promise<void> | null }));
+const hooks = vi.hoisted(() => ({ pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn(), profileReset: vi.fn(), block: null as Promise<void> | null }));
 vi.mock("./body-pose", () => ({ BodyPoseTracker: class {
   constructor(result: (pose: BodyPose) => void) { hooks.pose = result; }
   start() {}
   dispose = hooks.bodyDisposed;
+  resetProfile = hooks.profileReset;
 } }));
 vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({ GLTFLoader: class {
   setDRACOLoader() { return this; }
@@ -25,6 +26,7 @@ vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({ GLTFLoader: class {
 let engine: FaceEngine | undefined;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  hooks.profileReset.mockClear();
   hooks.bodyDisposed.mockClear(); hooks.pose = null; hooks.block = null;
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
@@ -118,6 +120,10 @@ describe("jewelry engine lifecycle", () => {
   });
   it("renders a necklace with live shoulders and chin even before segmentation acquires a contour", async () => {
     const {scene,module}=await start("necklace");
+    module.listeners!.find(l=>l.event==="facecontroller.faceupdated")!.process({detail:{
+      id:1,transform:{position:{x:0,y:0,z:-1},rotation:{x:0,y:0,z:0,w:1},scale:.1,scaledWidth:1},
+      vertices:[],attachmentPoints:{chin:{position:{x:0,y:-.1,z:0}}},
+    }});
     const points=Array.from({length:33},()=>({x:.5,y:.35,z:0,visibility:1}));
     points[11]={x:.7,y:.6,z:0,visibility:1};points[12]={x:.3,y:.6,z:0,visibility:1};
     hooks.pose!({points,width:640,height:480,time:performance.now(),neck:null});
@@ -126,14 +132,38 @@ describe("jewelry engine lifecycle", () => {
   });
   it("bridges a measured slow inference interval but still expires a missing person", async () => {
     const {scene,module}=await start("necklace");
+    module.listeners!.find(l=>l.event==="facecontroller.faceupdated")!.process({detail:{
+      id:1,transform:{position:{x:0,y:0,z:-1},rotation:{x:0,y:0,z:0,w:1},scale:.1,scaledWidth:1},
+      vertices:[],attachmentPoints:{chin:{position:{x:0,y:-.1,z:0}}},
+    }});
     const points=Array.from({length:33},()=>({x:.5,y:.35,z:0,visibility:1}));
     points[11]={x:.7,y:.6,z:0,visibility:1};points[12]={x:.3,y:.6,z:0,visibility:1};
     hooks.pose!({points,width:640,height:480,time:0,neck:null});
     await vi.advanceTimersByTimeAsync(700);
-    hooks.pose!({points,width:640,height:480,time:200,neck:null});
+    hooks.pose!({points,width:640,height:480,time:200,neck:{left:.44,right:.56,y:.5}});
     await vi.advanceTimersByTimeAsync(400);module.onUpdate!();
     expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(true);
     await vi.advanceTimersByTimeAsync(700);module.onUpdate!();
+    expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(false);
+  });
+  it("clears the saved neck profile when a different face acquires the mirror",async()=>{
+    const {module}=await start("necklace");
+    const emit=(name:string,detail:unknown)=>module.listeners!.find(l=>l.event==="facecontroller."+name)!.process({detail});
+    const face={id:1,transform:{position:{x:0,y:0,z:-1},rotation:{x:0,y:0,z:0,w:1},scale:1,scaledWidth:1},vertices:[],attachmentPoints:{}};
+    emit("faceupdated",face);emit("facelost",{id:1});emit("faceupdated",{...face,id:2});
+    expect(hooks.profileReset).toHaveBeenCalledTimes(1);
+  });
+  it("does not flash off when the face is reacquired while the body is still live",async()=>{
+    const {scene,module}=await start("necklace");
+    const emit=(name:string,detail:unknown)=>module.listeners!.find(l=>l.event==="facecontroller."+name)!.process({detail});
+    const face={id:1,transform:{position:{x:0,y:0,z:-1},rotation:{x:0,y:0,z:0,w:1},scale:1,scaledWidth:1},vertices:[],attachmentPoints:{}};
+    emit("faceupdated",face);
+    const points=Array.from({length:33},()=>({x:.5,y:.4,z:0,visibility:1}));points[11].x=.7;points[12].x=.3;
+    hooks.pose!({points,width:640,height:480,time:0,neck:{left:.44,right:.56,y:.5}});module.onUpdate!();
+    emit("facelost",{id:1});emit("faceupdated",{...face,id:2});module.onUpdate!();
+    expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(true);
+    expect(hooks.profileReset).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1500);module.onUpdate!();
     expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(false);
   });
   it("preserves the current model on a failed replacement and ignores late older loads", async () => {

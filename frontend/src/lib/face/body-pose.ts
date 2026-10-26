@@ -17,6 +17,8 @@ export type BodyPose = {
 export class BodyPoseTracker {
   private worker: Worker | null = null;
   private profile = new NeckProfileMemory();
+  private generation = 0;
+  private frameGeneration = 0;
   private ready = false;
   private busy = false;
   private disposed = false;
@@ -52,6 +54,7 @@ export class BodyPoseTracker {
       } else if (data.type === "pose") {
         if (this.deadline) clearTimeout(this.deadline);
         this.busy = false;
+        if (this.frameGeneration !== this.generation) return;
         this.result(
           this.profile.apply({
             points: data.points,
@@ -72,6 +75,7 @@ export class BodyPoseTracker {
     );
     this.timer = setInterval(() => void this.capture(), 110);
   }
+  resetProfile() { this.profile = new NeckProfileMemory(); this.generation++; }
   private fail(message: string) {
     this.dispose();
     this.failed(message);
@@ -92,6 +96,8 @@ export class BodyPoseTracker {
     this.previousVideoTime = video.currentTime;
     this.dimensions = { width: video.videoWidth, height: video.videoHeight };
     const capturedAt = performance.now();
+    const generation = this.generation;
+    this.frameGeneration = generation;
     let frame: ImageBitmap | undefined;
     try {
       const scale = Math.min(
@@ -103,8 +109,9 @@ export class BodyPoseTracker {
         resizeHeight: Math.round(video.videoHeight * scale),
         resizeQuality: "low",
       });
-      if (this.disposed) {
+      if (this.disposed || generation !== this.generation) {
         frame.close();
+        this.busy = false;
         return;
       }
       this.deadline = setTimeout(

@@ -8,12 +8,12 @@ const pose=():BodyPose=>{
 };
 it('provides a bounded visible necklace fit without a segmented silhouette',()=>{
  const p=pose(),neck=estimatedNeck(p,.42)!;
- expect(neck).toBeTruthy();expect(neck.y).toBeGreaterThan(.42);expect(neck.y).toBeLessThan(.6);
+ expect(neck).toBeTruthy();expect(neck.y).toBeGreaterThan(.42);expect(neck.y).toBeLessThan(.46);
  expect((neck.left+neck.right)/2).toBeCloseTo(.5);
  expect(neck.right-neck.left).toBeCloseTo(.132);
 });
-it('can use the visible mouth when the separate face engine temporarily misses the chin',()=>{
- expect(estimatedNeck(pose())).toBeTruthy();
+it('never invents a chin from mouth landmarks when the face engine misses it',()=>{
+ expect(estimatedNeck(pose())).toBeNull();
 });
 it('rejects missing shoulders/face and impossible anatomy instead of fitting arbitrary frames',()=>{
  const p=pose();p.points[12].visibility=.1;expect(estimatedNeck(p,.42)).toBeNull();

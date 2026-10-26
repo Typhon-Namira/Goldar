@@ -17,6 +17,7 @@ export default function StoreWindow({ store, products: inventory }: { store: Sto
   const frame = useRef<HTMLIFrameElement>(null), rail = useRef<HTMLDivElement>(null);
   const selectedRef = useRef(0), pendingRef = useRef<string | null>(null), readyRef = useRef(false);
   const initialProduct = useRef(products[0]?.id);
+  const intentRef = useRef(0), queuedRef = useRef<number | null>(null);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPending = useCallback(() => {
@@ -24,13 +25,23 @@ export default function StoreWindow({ store, products: inventory }: { store: Sto
     if (pendingTimer.current) clearTimeout(pendingTimer.current);
   }, []);
   const select = useCallback((index: number, direction = 0) => {
-    if (!readyRef.current || pendingRef.current || !products[index] || index === selectedRef.current) return;
+    if (!readyRef.current || !products[index]) return;
+    intentRef.current = index;
+    if (pendingRef.current) {
+      queuedRef.current = index;
+      setPending(products[index].id);
+      setFeedback(direction);
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = setTimeout(() => setFeedback(0), 650);
+      return;
+    }
+    if (index === selectedRef.current) return;
     const id = products[index].id;
     pendingRef.current = id; setPending(id); setError(false); setFeedback(direction);
     if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
     feedbackTimer.current = setTimeout(() => setFeedback(0), 650);
     frame.current?.contentWindow?.postMessage({ type: "goldar-window-select", id }, location.origin);
-    pendingTimer.current = setTimeout(() => { clearPending(); setError(true); }, 30000);
+    pendingTimer.current = setTimeout(() => { clearPending(); queuedRef.current = null; intentRef.current = selectedRef.current; setError(true); }, 30000);
   }, [products, clearPending]);
   useEffect(() => {
     const message = (event: MessageEvent) => {
@@ -42,20 +53,26 @@ export default function StoreWindow({ store, products: inventory }: { store: Sto
         if (index < 0 || pendingRef.current && data.id !== pendingRef.current) return;
         selectedRef.current = index; setSelected(index); clearPending();
         if (data.type === "goldar-window-ready") { readyRef.current = true; setReady(true); }
+        const queued = queuedRef.current; queuedRef.current = null;
+        if (queued !== null && queued !== index) queueMicrotask(() => select(queued));
+        else intentRef.current = index;
       } else if (data.type === "goldar-window-swipe" && (data.direction === -1 || data.direction === 1)) {
-        select(nextProductIndex(selectedRef.current, data.direction, products.length), data.direction);
+        select(nextProductIndex(intentRef.current, data.direction, products.length), data.direction);
       } else if (data.type === "goldar-window-model-error") {
         if (pendingRef.current && data.id !== pendingRef.current) return;
         clearPending(); setError(true);
+        const queued = queuedRef.current; queuedRef.current = null;
+        intentRef.current = selectedRef.current;
+        if (queued !== null && products[queued]?.id !== data.id) queueMicrotask(() => select(queued));
       } else if (data.type === "goldar-window-error") {
-        readyRef.current = false; setReady(false); clearPending(); setError(true); setFatal(true);
+        readyRef.current = false; setReady(false); clearPending(); queuedRef.current = null; intentRef.current = selectedRef.current; setError(true); setFatal(true);
       } else if (data.type === "goldar-window-gesture-error") setGestureError(true);
     };
     const keys = (event: KeyboardEvent) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
       const direction = event.key === "ArrowRight" ? 1 : -1;
-      select(nextProductIndex(selectedRef.current, direction, products.length), direction);
+      select(nextProductIndex(intentRef.current, direction, products.length), direction);
     };
     window.addEventListener("message", message); window.addEventListener("keydown", keys);
     return () => { window.removeEventListener("message", message); window.removeEventListener("keydown", keys); };
@@ -81,6 +98,7 @@ export default function StoreWindow({ store, products: inventory }: { store: Sto
   }, []);
   const restart = (camera = facing) => {
     initialProduct.current = products[selectedRef.current]?.id;
+    queuedRef.current = null; intentRef.current = selectedRef.current;
     readyRef.current = false; setReady(false); clearPending();
     setError(false); setFatal(false); setGestureError(false); setFacing(camera);
     setVersion((v) => v + 1);

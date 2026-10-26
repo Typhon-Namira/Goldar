@@ -201,7 +201,7 @@ describe("visible chin anatomical bounds", () => {
     const up = new Vector3(0, 1, 0).applyQuaternion(fit.rotation);
     const below = chin.clone().sub(fit.position).dot(up) / fit.mm;
     expect(below).toBeGreaterThanOrEqual(19.999);
-    expect(below).toBeLessThanOrEqual(fit.radius * 1.7 + 0.001);
+    expect(below).toBeLessThanOrEqual(65.001);
     expect(fit.rotation.w).toBeCloseTo(1);
   });
 });

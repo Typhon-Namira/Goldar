@@ -78,7 +78,7 @@ export class FaceEngine {
   private necklaceRig: NecklaceRig | null = null;
   private materialsReady = false;
   private faceChin: T.Vector3 | null = null;
-  private neckAnchorCorrection = 0;
+  private bodyFaceId: number | null = null;
   private neckRoot = new T.Group();
   private body: BodyPoseTracker | null = null;
   private neckFit: NeckFit | null = null;
@@ -169,13 +169,9 @@ export class FaceEngine {
             pose = {...pose,neck};
           }
           const camera = this.sceneCamera;
-          let depth = 1;
-          if (this.lastSeen && performance.now() - this.lastSeen < 2000) {
-            const view = this.root.position
-              .clone()
-              .applyMatrix4(camera.matrixWorldInverse);
-            depth = Math.max(0.2, -view.z);
-          }
+          // Body fitting is projective. A fixed camera plane avoids scale/pose
+          // pumping when independent face depth disappears and reacquires.
+          const depth = 1;
           let fit = fitNeck(
             pose,
             { width: this.canvas.width, height: this.canvas.height },
@@ -184,7 +180,6 @@ export class FaceEngine {
             this.facing === "front",
           );
           if (fit) {
-            const up = new T.Vector3(0, 1, 0).applyQuaternion(fit.rotation);
             const view = camera
               .getWorldPosition(new T.Vector3())
               .sub(this.root.position)
@@ -193,29 +188,13 @@ export class FaceEngine {
               new T.Vector3(0, 0, -1)
                 .applyQuaternion(this.root.quaternion)
                 .dot(view) > 0.9;
-            if (
-              this.faceChin &&
-              frontal &&
-              performance.now() - this.lastSeen < 350
-            ) {
+            if (this.faceChin && frontal && performance.now() - this.lastSeen < 1000) {
               const bounded = fitNeck(
-                pose,
-                { width: this.canvas.width, height: this.canvas.height },
-                camera,
-                depth,
-                this.facing === "front",
-                this.faceChin,
+                pose, {width: this.canvas.width, height: this.canvas.height},
+                camera, depth, this.facing === "front", this.faceChin,
               );
-              if (bounded) {
-                this.neckAnchorCorrection =
-                  bounded.position.clone().sub(fit.position).dot(up) / fit.mm;
-                fit = bounded;
-              }
-            } else
-              fit.position.addScaledVector(
-                up,
-                this.neckAnchorCorrection * fit.mm,
-              );
+              if (bounded) fit = bounded;
+            }
             const received = performance.now();
             const interval = Number.isFinite(this.neckReceived) ? received - this.neckReceived : 110;
             // Hold through one measured inference interval on slower displays,
@@ -478,6 +457,16 @@ export class FaceEngine {
       this.lobeFilters.forEach((filter) => filter.reset());
       this.lobeSurfaces.forEach((surface) => surface.reset());
     }
+    if (this.bodyFaceId !== null && this.bodyFaceId !== face.id) {
+      this.body?.resetProfile();
+      // XR8 can reacquire a face under a new ID while body tracking never
+      // stopped. Clear anatomy, but bridge that one in-flight body frame.
+      if (performance.now() - this.neckReceived > 300) {
+        this.neckFit = null;
+        this.neckReceived = -Infinity;
+      }
+    }
+    this.bodyFaceId = face.id;
     this.faceId = face.id;
     this.lastSeen = performance.now();
     this.root.position.set(t.position.x, t.position.y, t.position.z);
