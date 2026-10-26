@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
+  Texture,
+  DataTexture,
+  InstancedMesh,
+  SkinnedMesh,
+  Skeleton,
   BoxGeometry,
   Group,
   Mesh,
@@ -7,7 +12,7 @@ import {
   Box3,
   Vector3,
 } from "three";
-import { prepareJewelry } from "./calibration";
+import { prepareJewelry, disposeModel } from "./calibration";
 import { defaultCalibration } from "./config";
 describe("face jewelry calibration", () => {
   it("anchors the authored top centre regardless of model origin", () => {
@@ -52,4 +57,26 @@ describe("face jewelry calibration", () => {
     );
     expect(defaultCalibration("necklace").offset_mm[1]).toBeLessThan(0);
   });
+});
+
+it("releases shared model resources once, including GPU instance and bone buffers", () => {
+  const geometry = new BoxGeometry();
+  const texture = new Texture();
+  const material = new MeshStandardMaterial({ map: texture });
+  const model = new Group();
+  const instance = new InstancedMesh(geometry, material, 1);
+  const skin = new SkinnedMesh(geometry, material);
+  skin.skeleton = new Skeleton();
+  const boneTexture = new DataTexture();
+  skin.skeleton.boneTexture = boneTexture;
+  model.add(instance, skin);
+  const clone = model.clone();
+  const callbacks = [geometry, texture, material, instance, boneTexture].map((resource) => {
+    const handler = vi.fn();
+    resource.addEventListener("dispose", handler);
+    return handler;
+  });
+  disposeModel(model, clone);
+  callbacks.forEach((callback) => expect(callback).toHaveBeenCalledTimes(1));
+  expect(skin.skeleton.boneTexture).toBeNull();
 });

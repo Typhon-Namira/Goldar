@@ -42,16 +42,24 @@ async function loadEngine(): Promise<XR8Engine> {
       clearTimeout(timer);
       window.removeEventListener("xrloaded", ready);
       script.onerror = null;
-      error ? reject(error) : resolve(window.XR8!);
+      if (error) {
+        script.remove();
+        reject(error);
+      } else resolve(window.XR8!);
     };
     window.addEventListener("xrloaded", ready);
     script.onerror = () => finish(Error("Unable to load the face engine."));
     document.head.appendChild(script);
   });
+  loadingEngine = loadingEngine.catch((error) => {
+    loadingEngine = null;
+    throw error;
+  });
   return loadingEngine;
 }
 export class FaceEngine {
   private disposed = false;
+  private trackingFailed = false;
   private xr: XR8Engine | null = null;
   private root = new T.Group();
   private left = new T.Group();
@@ -81,6 +89,9 @@ export class FaceEngine {
   );
   private model: T.Object3D | null = null;
   private environment: T.Texture | null = null;
+  private previousEnvironment: T.Texture | null = null;
+  private scene: T.Scene | null = null;
+  private lighting = new T.Group();
   private faceId: number | null = null;
   private ears = new EarLobeTracking();
   private lastSeen = 0;
@@ -255,7 +266,9 @@ export class FaceEngine {
     const module: PipelineModule = {
       name: "goldar-face-jewelry",
       onCameraStatusChange: ({ status, video }) => {
-        if (status === "hasVideo" && video) this.body?.start(video);
+        if (status === "failed") this.failTracking("Camera unavailable. Stop and retry.");
+        else if (!this.trackingFailed && status === "hasVideo" && video)
+          this.body?.start(video);
       },
       onUpdate: () => this.updateBody(),
       onStart: () => {
@@ -265,12 +278,15 @@ export class FaceEngine {
         renderer.outputColorSpace = T.SRGBColorSpace;
         renderer.toneMapping = T.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1;
+        this.scene = scene;
+        this.previousEnvironment = scene.environment;
         this.environment = studioEnvironment();
         scene.environment = this.environment;
-        scene.add(new T.HemisphereLight(0xffffff, 0x554533, 1.3));
+        this.lighting.add(new T.HemisphereLight(0xffffff, 0x554533, 1.3));
         const light = new T.DirectionalLight(0xffeddb, 2);
         light.position.set(1, 2, 3);
-        scene.add(light, this.root, this.neckRoot);
+        this.lighting.add(light);
+        scene.add(this.lighting, this.root, this.neckRoot);
         if (this.necklaceRig) {
           void renderer
             .compileAsync(this.neckRoot, camera, scene)
@@ -289,16 +305,7 @@ export class FaceEngine {
             : "Look at the camera. Keep your face and ears in view.",
         );
       },
-      onException: (error) => {
-        if (!this.disposed) {
-          this.root.visible = false;
-          this.status(
-            error instanceof Error
-              ? error.message
-              : "Camera tracking failed. Stop and retry.",
-          );
-        }
-      },
+      onException: (error) => this.failTracking(error),
       listeners: [
         {
           event: "facecontroller.faceloading",
@@ -344,6 +351,7 @@ export class FaceEngine {
       if (this.root.visible && performance.now() - this.lastSeen > 700) {
         this.root.visible = false;
         this.faceId = null;
+        this.faceChin = null;
         if (!this.body) this.status("Looking for your face…");
       }
     }, 200);
@@ -367,6 +375,18 @@ export class FaceEngine {
       webgl2: true,
     });
   }
+  private failTracking(error: unknown) {
+    if (this.disposed || this.trackingFailed) return;
+    this.trackingFailed = true;
+    this.root.visible = this.neckRoot.visible = false;
+    this.bodyError = error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "Camera tracking failed. Stop and retry.";
+    this.body?.dispose();
+    this.status(this.bodyError);
+  }
   private geometry(data: GeometryData) {
     if (this.disposed || !Array.isArray(data.indices)) return;
     this.occluder.geometry.setIndex(
@@ -376,6 +396,7 @@ export class FaceEngine {
   private update(face: FaceData) {
     if (
       this.disposed ||
+      this.trackingFailed ||
       !face?.transform ||
       !validPoint(face.transform.position) ||
       !Array.isArray(face.vertices)
@@ -578,9 +599,10 @@ export class FaceEngine {
     this.xr?.stop();
     this.root.removeFromParent();
     this.neckRoot.removeFromParent();
-    disposeModel(this.neckRoot);
-    disposeModel(this.root);
-    if (this.model) disposeModel(this.model);
+    disposeModel(this.neckRoot, this.root, ...(this.model ? [this.model] : []));
+    this.lighting.removeFromParent();
+    if (this.scene && this.scene.environment === this.environment)
+      this.scene.environment = this.previousEnvironment;
     this.environment?.dispose();
   }
 }

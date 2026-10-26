@@ -34,3 +34,23 @@ describe("person-specific neck proportions", () => {
     expect(memory.apply(pose(2000)).neck).toBeUndefined();
   });
 });
+
+it("expires an unobserved neck even while shoulder detections continue", () => {
+  const memory = new NeckProfileMemory();
+  const first = pose(0);
+  first.neck = { left: 0.45, right: 0.55, y: 0.35 };
+  memory.apply(first);
+  for (let time = 100; time <= 1200; time += 100)
+    expect(memory.apply(pose(time)).neck).toBeDefined();
+  expect(memory.apply(pose(1300)).neck).toBeUndefined();
+});
+
+
+it("reacquires the contour when camera dimensions change instead of rotating old normalized proportions", () => {
+  const memory = new NeckProfileMemory();
+  const first = pose(0);
+  first.neck = { left: 0.45, right: 0.55, y: 0.35 };
+  memory.apply(first);
+  const rotated = { ...pose(100), width: 480, height: 640 };
+  expect(memory.apply(rotated).neck).toBeUndefined();
+});

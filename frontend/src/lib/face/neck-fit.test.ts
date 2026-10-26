@@ -147,6 +147,18 @@ describe("learned neck silhouette extraction", () => {
     expect(result.y).toBeGreaterThan(0.4);
     expect(result.right - result.left).toBeGreaterThan(0.15);
   });
+  it("uses camera aspect rather than the square segmentation tensor for the chin band", () => {
+    const p = pose().points;
+    p[0] = { x: 0.5, y: 0.25, z: 0, visibility: 1 };
+    p[9].y = p[10].y = 0.35;
+    const values = new Uint8Array(10000).fill(255);
+    for (let y = 30; y < 58; y++)
+      for (let x = 42; x <= 58; x++) values[y * 100 + x] = 0;
+    const result = extract(p, new Uint8ClampedArray(), 200, 100,
+      { values, width: 100, height: 100, category: true }, { chinY: 0.4 })!;
+    // The input is 2:1, so the shoulder-relative margin is .064, not .032.
+    expect(result.y).toBeGreaterThanOrEqual(0.464);
+  });
   it("rejects an obscured neck rather than returning a chest-sized skin mask", () => {
     expect(
       extract(

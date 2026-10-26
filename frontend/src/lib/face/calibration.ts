@@ -24,17 +24,25 @@ export function prepareJewelry(model: T.Object3D, c: FaceCalibrationConfig) {
   attachment.add(normalized);
   return attachment;
 }
-export function disposeModel(root: T.Object3D) {
+export function disposeModel(...roots: T.Object3D[]) {
   const materials = new Set<T.Material>(),
     textures = new Set<T.Texture>(),
-    geometries = new Set<T.BufferGeometry>();
-  root.traverse((o) => {
-    if (o instanceof T.Mesh) {
-      geometries.add(o.geometry);
-      for (const m of Array.isArray(o.material) ? o.material : [o.material])
-        materials.add(m);
-    }
+    geometries = new Set<T.BufferGeometry>(),
+    instances = new Set<T.InstancedMesh>(),
+    skeletons = new Set<T.Skeleton>();
+  roots.forEach((root) => {
+    root.traverse((o) => {
+      if (o instanceof T.Mesh) {
+        if (o instanceof T.InstancedMesh) instances.add(o);
+        if (o instanceof T.SkinnedMesh) skeletons.add(o.skeleton);
+        geometries.add(o.geometry);
+        for (const m of Array.isArray(o.material) ? o.material : [o.material])
+          materials.add(m);
+      }
+    });
   });
+  instances.forEach((mesh) => mesh.dispose());
+  skeletons.forEach((skeleton) => skeleton.dispose());
   materials.forEach((m) => {
     Object.values(m).forEach((v) => {
       if (v instanceof T.Texture) textures.add(v);

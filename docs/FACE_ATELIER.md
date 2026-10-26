@@ -159,7 +159,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 56 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 68 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission
@@ -181,3 +181,27 @@ off-centre necks and portrait cover-crop. Pendant attachment stays within one
 viewport pixel of the fitted neck centreline. Additional raycasts verify one
 connected visible arc and hidden rear links after recentering. Phone imagery
 is still required to judge real anatomical alignment.
+
+## Lifecycle and tracking audit
+
+- Body results retain image-capture time, including bitmap creation latency;
+  a delayed worker result cannot revive a necklace as a fresh observation.
+- Cached neck proportions expire 1.2 seconds after the last measured contour,
+  even if shoulders remain visible. Camera-dimension changes force acquisition.
+- Chin-to-shoulder scan margins use camera-frame aspect ratio, not the square
+  segmentation tensor's aspect.
+- Camera failure status and pipeline exceptions hide both jewelry roots and
+  stop body inference. Subsequent face events cannot revive a failed session.
+- Failed engine scripts can be retried. Stop deduplicates shared geometry,
+  textures and materials across clones and disposes instance/bone GPU buffers;
+  preview lights are removed and the previous scene environment restored.
+
+Tests exercise delayed inference, Stop during bitmap creation, failed frame
+transfer, face-loss/reacquisition, camera failure, resource cleanup and loading
+retry. The audit also runs the six isolated backend calibration/API tests.
+
+The audit's Chromium run used the actual 8th Wall engine and photographic
+camera input: earring display and Stop/restart passed. A separate real CPU
+worker run loaded both local models and returned 33 body landmarks; its
+collared portrait did not acquire a neck contour. This confirms model/worker
+integration, not a successful necklace fitting or phone performance.

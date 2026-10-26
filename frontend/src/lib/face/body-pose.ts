@@ -56,7 +56,7 @@ export class BodyPoseTracker {
           this.profile.apply({
             points: data.points,
             neck: data.neck,
-            time: performance.now(),
+            time: data.time,
             ...this.dimensions,
           }),
         );
@@ -91,12 +91,14 @@ export class BodyPoseTracker {
     this.busy = true;
     this.previousVideoTime = video.currentTime;
     this.dimensions = { width: video.videoWidth, height: video.videoHeight };
+    const capturedAt = performance.now();
+    let frame: ImageBitmap | undefined;
     try {
       const scale = Math.min(
         1,
         384 / Math.max(video.videoWidth, video.videoHeight),
       );
-      const frame = await createImageBitmap(video, {
+      frame = await createImageBitmap(video, {
         resizeWidth: Math.round(video.videoWidth * scale),
         resizeHeight: Math.round(video.videoHeight * scale),
         resizeQuality: "low",
@@ -113,13 +115,15 @@ export class BodyPoseTracker {
         {
           type: "frame",
           frame,
-          time: performance.now(),
+          time: capturedAt,
           region: this.reference?.(video.videoWidth, video.videoHeight) ?? null,
         },
         [frame],
       );
     } catch {
-      this.fail("Unable to read camera frames for body tracking.");
+      frame?.close();
+      if (!this.disposed)
+        this.fail("Unable to read camera frames for body tracking.");
     }
   }
   dispose() {

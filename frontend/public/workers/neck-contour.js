@@ -1,13 +1,14 @@
 /* Neck-band silhouette from the learned person mask. Shadows and complexion
  * never define the left/right boundary. Category 0 is person, 255 background. */
-self.findNeckContour = (points, _pixels, _width, _height, person, region) => {
+self.findNeckContour = (points, _pixels, imageWidth, imageHeight, person, region) => {
   if (
     !person ||
     !region ||
     !Number.isFinite(region.chinY) ||
-    !points[12] ||
-    !points[10] ||
-    !points[0] ||
+    ![0, 9, 10, 11, 12].every((i) =>
+      points[i] && Number.isFinite(points[i].x) && Number.isFinite(points[i].y)
+    ) ||
+    !(imageWidth > 0 && imageHeight > 0) ||
     (points[0].visibility ?? 0) < 0.5
   )
     return null;
@@ -26,7 +27,9 @@ self.findNeckContour = (points, _pixels, _width, _height, person, region) => {
   const shoulderWidth = Math.abs(points[11].x - points[12].x);
   const centerX =
     (points[11].x + points[12].x + points[9].x + points[10].x) / 4;
-  const aspect = person.width / person.height;
+  // The model mask is square even for a portrait/landscape camera. Normalized
+  // landmark distances belong to the input image, not that tensor's aspect.
+  const aspect = imageWidth / imageHeight;
   const start = Math.max(region.chinY + shoulderWidth * 0.08 * aspect, mouthY);
   const end = shoulderY - shoulderWidth * 0.04 * aspect;
   if (end - start < 2 / person.height) return null;

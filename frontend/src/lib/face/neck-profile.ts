@@ -4,7 +4,14 @@ import type { BodyPose } from "./body-pose";
 export class NeckProfileMemory {
   private profile: { left: number; right: number; y: number } | null = null;
   private lastSeen = -Infinity;
+  private lastContour = -Infinity;
+  private dimensions = "";
   apply(pose: BodyPose): BodyPose {
+    const dimensions = `${pose.width}x${pose.height}`;
+    if (dimensions !== this.dimensions) {
+      this.profile = null;
+      this.dimensions = dimensions;
+    }
     const left = pose.points[11],
       right = pose.points[12];
     if (
@@ -14,13 +21,19 @@ export class NeckProfileMemory {
       (right.visibility ?? 0) < 0.65
     )
       return pose;
-    if (pose.time - this.lastSeen > 1200) this.profile = null;
+    if (
+      pose.time < this.lastSeen ||
+      pose.time - this.lastSeen > 1200 ||
+      pose.time - this.lastContour > 1200
+    )
+      this.profile = null;
     this.lastSeen = pose.time;
     const width = Math.abs(left.x - right.x),
       x = (left.x + right.x) / 2,
       y = (left.y + right.y) / 2;
     if (width < 0.12) return pose;
     if (pose.neck) {
+      this.lastContour = pose.time;
       this.profile = {
         left: (pose.neck.left - x) / width,
         right: (pose.neck.right - x) / width,
