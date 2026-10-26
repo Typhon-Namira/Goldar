@@ -2,7 +2,7 @@
 var exports = {};
 importScripts("/vendor/mediapipe/vision_bundle.js");
 importScripts("/workers/neck-contour.js");
-let tracker, segmenter;
+let tracker, segmenter, contourFrame = 0;
 self.onmessage = async ({ data }) => {
   if (data.type === "init") {
     try {
@@ -41,6 +41,12 @@ self.onmessage = async ({ data }) => {
     try {
       pose = tracker.detectForVideo(data.frame, data.time);
       const points = pose.landmarks[0] || [];
+      // Pose stays responsive while the more expensive silhouette is sampled
+      // every third frame. Main-thread profile memory carries measured shape.
+      if (!data.region || contourFrame++ % 3 !== 0) {
+        self.postMessage({type:"pose",points,neck:null,time:data.time});
+        return;
+      }
       // Consume the borrowed mask inside the callback; only coordinates leave
       // the worker. No confidence-mask clone or image upload is necessary.
       segmenter.segmentForVideo(data.frame, data.time, (result) => {

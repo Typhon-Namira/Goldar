@@ -161,7 +161,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 77 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 84 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission
@@ -207,3 +207,11 @@ camera input: earring display and Stop/restart passed. A separate real CPU
 worker run loaded both local models and returned 33 body landmarks; its
 collared portrait did not acquire a neck contour. This confirms model/worker
 integration, not a successful necklace fitting or phone performance.
+
+For shop-mirror sessions, the new bounded face/shoulder estimate prevents a
+missing initial silhouette from suppressing every necklace. Measured contours
+remain preferred. The silhouette worker samples every third pose frame. Pose
+expiry now adapts to measured inference delay/cadence, bounded at 1.4 seconds,
+while retaining capture timestamps. See INTERACTIVE_WINDOW.md for current
+startup, independent hand tracking and icon-only UI. Earlier chronological
+audit notes describe the prior behavior and its former 650ms timeout.

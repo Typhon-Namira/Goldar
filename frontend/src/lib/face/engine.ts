@@ -1,4 +1,6 @@
-import { SwipeDetector, type SwipeDirection } from "../kiosk/swipe";
+import type { SwipeDirection } from "../kiosk/swipe";
+import { HandSwipeTracker } from "../kiosk/hand-tracker";
+import { estimatedNeck } from "./neck-observation";
 import { NecklaceRig } from "./necklace-rig";
 import { neckSurface } from "./neck-surface";
 import { StableNeckFrame } from "./body-stability";
@@ -61,7 +63,8 @@ async function loadEngine(): Promise<XR8Engine> {
 export class FaceEngine {
   private assetVersion = 0;
   private assetRequest = 0;
-  private swipe = new SwipeDetector();
+  private hand: HandSwipeTracker | null = null;
+  private neckEstimated = false;
   private modelError = "";
   private disposed = false;
   private trackingFailed = false;
@@ -79,6 +82,8 @@ export class FaceEngine {
   private neckRoot = new T.Group();
   private body: BodyPoseTracker | null = null;
   private neckFit: NeckFit | null = null;
+  private neckReceived = -Infinity;
+  private neckExpiry = 650;
   private bodyError = "";
   private bodyStability = new StableNeckFrame();
   private sceneCamera: T.PerspectiveCamera | null = null;
@@ -153,11 +158,16 @@ export class FaceEngine {
       this.body = new BodyPoseTracker(
         (pose) => {
           if (this.disposed) return;
-          if (this.options.onSwipe && performance.now() - pose.time < 650) {
-            const direction = this.swipe.update(pose, this.facing === "front");
-            if (direction) this.options.onSwipe(direction);
+          if (this.product.category !== "necklace" || !this.sceneCamera) return;
+          this.neckEstimated = !pose.neck;
+          if (!pose.neck) {
+            const chin = this.faceChin && performance.now() - this.lastSeen < 1000
+              ? videoPoint(this.faceChin, pose, {width:this.canvas.width,height:this.canvas.height}, this.sceneCamera, this.facing === "front").y
+              : undefined;
+            const neck = estimatedNeck(pose, chin);
+            if (!neck) return;
+            pose = {...pose,neck};
           }
-          if (this.product.category !== "necklace" || !this.sceneCamera || !pose.neck) return;
           const camera = this.sceneCamera;
           let depth = 1;
           if (this.lastSeen && performance.now() - this.lastSeen < 2000) {
@@ -206,18 +216,24 @@ export class FaceEngine {
                 up,
                 this.neckAnchorCorrection * fit.mm,
               );
+            const received = performance.now();
+            const interval = Number.isFinite(this.neckReceived) ? received - this.neckReceived : 110;
+            // Hold through one measured inference interval on slower displays,
+            // while preserving capture timestamps and a hard stale-pose bound.
+            this.neckExpiry = Math.min(1400, Math.max(650, received - pose.time + interval * 1.5 + 100));
+            this.neckReceived = received;
             this.neckFit = fit;
           }
         },
         (message) => {
           this.bodyError = message;
-          this.options.onGestureError?.(message);
+
         },
         (width, height) => {
           if (
             !this.faceChin ||
             !this.sceneCamera ||
-            performance.now() - this.lastSeen > 350
+            performance.now() - this.lastSeen > 1000
           )
             return null;
           const point = videoPoint(
@@ -231,6 +247,11 @@ export class FaceEngine {
         },
       );
     }
+    if (this.options.onSwipe) this.hand = new HandSwipeTracker(
+      this.options.onSwipe,
+      () => this.options.onGestureError?.("Hand tracking unavailable"),
+      facing === "front",
+    );
     this.root.visible = false;
     this.occluder.renderOrder = -20;
     this.occluder.frustumCulled = false;
@@ -243,8 +264,10 @@ export class FaceEngine {
       name: "goldar-face-jewelry",
       onCameraStatusChange: ({ status, video }) => {
         if (status === "failed") this.failTracking("Camera unavailable. Stop and retry.");
-        else if (!this.trackingFailed && status === "hasVideo" && video)
+        else if (!this.trackingFailed && status === "hasVideo" && video) {
           this.body?.start(video);
+          this.hand?.start(video);
+        }
       },
       onUpdate: () => this.updateBody(),
       onStart: () => {
@@ -423,6 +446,7 @@ export class FaceEngine {
         ? error
         : "Camera tracking failed. Stop and retry.";
     this.body?.dispose();
+    this.hand?.dispose();
     this.status(this.bodyError);
     this.options.onFatalError?.(this.bodyError);
   }
@@ -580,7 +604,7 @@ export class FaceEngine {
       return;
     }
     const target = this.neckFit;
-    if (!target || now - target.time > 650 || this.bodyError) {
+    if (!target || now - target.time > this.neckExpiry || this.bodyError) {
       this.neckRoot.visible = false;
       this.status(
         this.bodyError ||
@@ -632,7 +656,7 @@ export class FaceEngine {
     if (this.neckDepth) updateNeckOccluder(this.neckDepth, surface);
     this.left.visible = true;
     this.neckRoot.visible = true;
-    this.status("Necklace preview · neck contour tracked");
+    this.status(this.neckEstimated ? "Necklace preview · estimated fit" : "Necklace preview · neck contour tracked");
   }
   dispose() {
     if (this.disposed) return;
@@ -640,6 +664,7 @@ export class FaceEngine {
     if (this.watchdog) clearInterval(this.watchdog);
     this.resizeObserver?.disconnect();
     this.body?.dispose();
+    this.hand?.dispose();
     this.xr?.stop();
     this.root.removeFromParent();
     this.neckRoot.removeFromParent();

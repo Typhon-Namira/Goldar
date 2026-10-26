@@ -8,3 +8,9 @@ Google MediaPipe Selfie Segmentation model
 Source: @mediapipe/selfie_segmentation@0.1.1675465747 (Google; Apache-2.0).
 Input normalization metadata added by Goldar; model weights unchanged.
 See the same LICENSE.txt and THIRD_PARTY_FACE_ENGINE.md for reproduction.
+
+Google MediaPipe Hands Lite models
+Source: @mediapipe/hands@0.4.1675469240 (Google; Apache-2.0).
+Palm detector and hand landmark model repackaged with input normalization
+metadata; model weights unchanged. See LICENSE.txt and the repository's
+THIRD_PARTY_FACE_ENGINE.md for deterministic reproduction.

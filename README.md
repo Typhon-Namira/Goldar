@@ -1,10 +1,10 @@
 # Goldar — Interactive Jewelry Windows
 
-Goldar turns a jewelry shop display and webcam into a live try-on mirror. Each store has one public display link, a product rail, and raised-hand swipes for touch-free selection. A private admin studio manages stores, manually authored jewelry GLBs, cover images, publication and fitting calibration. See [display setup and operation](docs/INTERACTIVE_WINDOW.md).
+Goldar turns a jewelry shop display and webcam into a live try-on mirror. Each store has one public display link, a product rail, and independent palm tracking for touch-free selection. A private admin studio manages stores, manually authored jewelry GLBs, cover images, publication and fitting calibration. See [display setup and operation](docs/INTERACTIVE_WINDOW.md).
 
 ## Current implementation status
 
-- Implemented: fullscreen portrait/landscape store displays, local wrist-swipe selection, live earring/necklace swaps in one camera session, operator fullscreen/wake-lock controls, single-superadmin login, store/product CRUD, publication control, per-product calibration previews, QR links and S3-compatible presigned uploads. Existing individual product/3D viewer and native scene-placement routes remain available.
+- Implemented: fullscreen portrait/landscape store displays, independent palm-swipe selection, live earring/necklace swaps in one camera session, automatic camera startup, icon-only controls and optional fullscreen/wake lock, single-superadmin login, store/product CRUD, publication control, per-product calibration previews, QR links and S3-compatible presigned uploads. Existing individual product/3D viewer and native scene-placement routes remain available.
 - Face Atelier: local 8th Wall face/ear tracking for earrings and MediaPipe body/neck fitting for necklaces. No WiLoR endpoint or server inference is used. Model calibration is saved per product. See [setup, model preparation and deployment](docs/FACE_ATELIER.md).
 - Not validated: physical sizing, general hair/clothing occlusion, dangling-earring physics, and production accuracy/performance across physical iOS/Android devices. Necklaces use shoulder landmarks and an optional exposed-neck outline; fitting remains an approximate visual preview.
 

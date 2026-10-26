@@ -53,5 +53,5 @@ export default function WindowRuntime({ products, initialId, facing }: {
       engine.dispose();
     };
   }, [products, initialId, facing]);
-  return <main lang="fa" style={{ position: "fixed", inset: 0 }}><canvas ref={canvas} aria-label="تصویر زندهٔ ویترین" style={{ position: "fixed", inset: 0, width: "100%", height: "100%", background: "#10130f" }} /></main>;
+  return <main lang="hy" style={{ position: "fixed", inset: 0 }}><canvas ref={canvas} aria-label="Live jewelry mirror" style={{ position: "fixed", inset: 0, width: "100%", height: "100%", background: "#10130f" }} /></main>;
 }

@@ -63,3 +63,26 @@ python scripts/repack-selfie-model.py --source /path/to/package/selfie_segmentat
 
 Normalized model SHA256:
 `0859a70e2e3e9ab40f1dced1c93ee2cdf8fb43abffe7a010408dd067c7158e98`.
+
+## Independent hand tracking
+
+`hand_landmarker_lite.task` repackages Google's Apache-2.0
+`@mediapipe/hands@0.4.1675469240` npm models. The package's packed-assets loader
+identifies bytes 2341291–4326731 as `palm_detection_lite.tflite`; the second model
+is `hand_landmark_lite.tflite`. Input normalization metadata (mean 0, std 255)
+is added without changing model buffers/weights, and both models are placed in
+a deterministic uncompressed Tasks archive. This is a legacy model repackaging,
+not the current Google downloadable HandLandmarker bundle.
+
+Reproduce with the same schema/Python dependencies documented above:
+
+```bash
+npm pack @mediapipe/hands@0.4.1675469240
+# Extract the package, then:
+python scripts/repack-hand-model.py --source-dir /path/to/package \
+  --schema-dir /path/to/tensorflow_lite_support/metadata \
+  --output public/models/tracking/hand_landmarker_lite.task
+```
+
+SHA256: `c42df3382c16edddf9f2ee8e1f6ca7c4f2f060fe3fd783d7b38915e74787125b`.
+The existing `/models/tracking/LICENSE.txt` supplies Apache-2.0 terms.

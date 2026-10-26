@@ -116,6 +116,26 @@ describe("jewelry engine lifecycle", () => {
     expect(xr.stop).not.toHaveBeenCalled();
     expect(xr.loadChunk).toHaveBeenCalledTimes(2);
   });
+  it("renders a necklace with live shoulders and chin even before segmentation acquires a contour", async () => {
+    const {scene,module}=await start("necklace");
+    const points=Array.from({length:33},()=>({x:.5,y:.35,z:0,visibility:1}));
+    points[11]={x:.7,y:.6,z:0,visibility:1};points[12]={x:.3,y:.6,z:0,visibility:1};
+    hooks.pose!({points,width:640,height:480,time:performance.now(),neck:null});
+    module.onUpdate!();
+    expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(true);
+  });
+  it("bridges a measured slow inference interval but still expires a missing person", async () => {
+    const {scene,module}=await start("necklace");
+    const points=Array.from({length:33},()=>({x:.5,y:.35,z:0,visibility:1}));
+    points[11]={x:.7,y:.6,z:0,visibility:1};points[12]={x:.3,y:.6,z:0,visibility:1};
+    hooks.pose!({points,width:640,height:480,time:0,neck:null});
+    await vi.advanceTimersByTimeAsync(700);
+    hooks.pose!({points,width:640,height:480,time:200,neck:null});
+    await vi.advanceTimersByTimeAsync(400);module.onUpdate!();
+    expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(true);
+    await vi.advanceTimersByTimeAsync(700);module.onUpdate!();
+    expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(false);
+  });
   it("preserves the current model on a failed replacement and ignores late older loads", async () => {
     const { scene, xr } = await start("earring", { onSwipe: vi.fn() });
     await expect(engine!.setProduct({ category: "necklace", glb_url: "/broken.glb" } as Product)).rejects.toThrow();
