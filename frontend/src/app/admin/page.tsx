@@ -739,14 +739,14 @@ export default function Admin() {
               <>
                 <div className="admin-actions" style={{ marginBottom: 30 }}>
                   <button className="btn" onClick={() => startStore()}>
-                    + Create atelier
+                    + Create store
                   </button>
                 </div>
                 <div className="admin-grid">
                   {stores.map((s) => (
                     <div className="store-tile" key={s.id}>
                       <p className="eyebrow">
-                        {s.published ? "Live catalog" : "Hidden catalog"}
+                        {s.published ? "Live window" : "Hidden window"}
                       </p>
                       <h3>{s.name}</h3>
                       <p className="muted" style={{ fontSize: 12 }}>
@@ -788,21 +788,26 @@ export default function Admin() {
                     className="btn ghost"
                     onClick={() => startStore(selected)}
                   >
-                    Edit atelier
+                    Edit store
                   </button>
                   <a
                     className="btn ghost"
                     href={"/s/" + selected.slug}
                     target="_blank"
                   >
-                    View catalog ↗
+                    Open display ↗
                   </a>
                   <button className="btn" onClick={() => startProduct()}>
                     + Add jewelry
                   </button>
                 </div>
                 <div className="admin-card">
-                  <p className="eyebrow">Shareable catalog</p>
+                  <p className="eyebrow">Interactive shop window</p>
+                  <p className="muted" style={{ fontSize: 13, lineHeight: 1.8 }}>
+                    Open this link on the window display, connect a webcam, and start the mirror.
+                    Visitors switch jewelry with a raised hand swipe. Only published earrings and
+                    necklaces with a 3D model and AR enabled appear on the display.
+                  </p>
                   <div
                     style={{
                       display: "flex",
@@ -833,7 +838,7 @@ export default function Admin() {
                           )
                         }
                       >
-                        Copy catalog link
+                        Copy display link
                       </button>
                     </div>
                   </div>

@@ -2,6 +2,8 @@
 
 ## What runs
 
+Store links `/s/:slug` now open the touch-free [interactive shop window](INTERACTIVE_WINDOW.md), using a persistent `/window-runtime/:slug` iframe for live asset swaps. The product-specific routes below remain operator previews.
+
 `/ar/:id` loads Face Atelier for enabled `earring` and `necklace` products.
 Each camera session uses an isolated same-origin `/face-runtime/:id` iframe.
 Stopping removes that document and its camera, GPU resources, pose worker and SDK globals.
@@ -159,7 +161,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 68 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 77 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission

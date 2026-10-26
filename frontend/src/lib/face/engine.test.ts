@@ -4,7 +4,7 @@ import type { Product } from "../api";
 import type { BodyPose } from "./body-pose";
 import type { PipelineModule, FaceData } from "./types";
 import { FaceEngine } from "./engine";
-const hooks = vi.hoisted(() => ({ pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn() }));
+const hooks = vi.hoisted(() => ({ pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn(), block: null as Promise<void> | null }));
 vi.mock("./body-pose", () => ({ BodyPoseTracker: class {
   constructor(result: (pose: BodyPose) => void) { hooks.pose = result; }
   start() {}
@@ -13,8 +13,11 @@ vi.mock("./body-pose", () => ({ BodyPoseTracker: class {
 vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({ GLTFLoader: class {
   setDRACOLoader() { return this; }
   setMeshoptDecoder() { return this; }
-  async loadAsync() {
+  async loadAsync(url: string) {
+    if (url === "/broken.glb") throw Error("broken model");
+    if (url === "/slow.glb") await hooks.block;
     const scene = new Group();
+    scene.name = url;
     scene.add(new Mesh(new BoxGeometry(1, 2, 1), new MeshStandardMaterial()));
     return { scene };
   }
@@ -22,11 +25,11 @@ vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({ GLTFLoader: class {
 let engine: FaceEngine | undefined;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
-  hooks.bodyDisposed.mockClear(); hooks.pose = null;
+  hooks.bodyDisposed.mockClear(); hooks.pose = null; hooks.block = null;
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
 afterEach(() => { engine?.dispose(); engine = undefined; vi.useRealTimers(); vi.unstubAllGlobals(); });
-async function start(category: string) {
+async function start(category: string, options: ConstructorParameters<typeof FaceEngine>[3] = {}) {
   const scene = new Scene(), previousEnvironment = new Texture();
   scene.environment = previousEnvironment;
   const camera = new PerspectiveCamera(60, 4 / 3, 0.01, 100);
@@ -43,7 +46,7 @@ async function start(category: string) {
   vi.stubGlobal("window", { XR8: xr, innerWidth: 640, innerHeight: 480 });
   const canvas = { width: 640, height: 480, parentElement: { clientWidth: 640, clientHeight: 480 }, style: {} } as unknown as HTMLCanvasElement;
   const status = vi.fn();
-  engine = new FaceEngine(canvas, { category, glb_url: "/fixture.glb" } as Product, status);
+  engine = new FaceEngine(canvas, { category, glb_url: "/fixture.glb" } as Product, status, options);
   await engine.start("front");
   return { scene, module, status, xr, previousEnvironment };
 }
@@ -95,6 +98,36 @@ describe("jewelry engine lifecycle", () => {
     expect(scene.children).toHaveLength(0);
     expect(scene.environment).toBe(previousEnvironment);
     expect(xr.stop).toHaveBeenCalledTimes(1);
+  });
+  it("swaps earrings and necklaces without restarting the webcam or pipeline", async () => {
+    const { scene, module, xr } = await start("earring", { onSwipe: vi.fn() });
+    expect(xr.FaceController.configure).toHaveBeenCalledWith(expect.objectContaining({ enableEars: true }));
+    await engine!.setProduct({ category: "necklace", glb_url: "/neck.glb" } as Product);
+    const points = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.6, z: 0, visibility: 1 }));
+    points[11].x = 0.7; points[12].x = 0.3;
+    hooks.pose!({ points, neck: { left: 0.44, right: 0.56, y: 0.5 }, width: 640, height: 480, time: performance.now() });
+    module.onUpdate!();
+    expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(true);
+    await engine!.setProduct({ category: "earring", glb_url: "/ear.glb" } as Product);
+    module.onUpdate!();
+    expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(false);
+    expect(scene.getObjectByName("/ear.glb")).toBeDefined();
+    expect(xr.run).toHaveBeenCalledTimes(1);
+    expect(xr.stop).not.toHaveBeenCalled();
+    expect(xr.loadChunk).toHaveBeenCalledTimes(2);
+  });
+  it("preserves the current model on a failed replacement and ignores late older loads", async () => {
+    const { scene, xr } = await start("earring", { onSwipe: vi.fn() });
+    await expect(engine!.setProduct({ category: "necklace", glb_url: "/broken.glb" } as Product)).rejects.toThrow();
+    expect(scene.getObjectByName("/fixture.glb")).toBeDefined();
+    let release!: () => void;
+    hooks.block = new Promise<void>((resolve) => { release = resolve; });
+    const slow = engine!.setProduct({ category: "earring", glb_url: "/slow.glb" } as Product);
+    expect(await engine!.setProduct({ category: "earring", glb_url: "/new.glb" } as Product)).toBe(true);
+    release(); expect(await slow).toBe(false);
+    expect(scene.getObjectByName("/new.glb")).toBeDefined();
+    expect(scene.getObjectByName("/slow.glb")).toBeUndefined();
+    expect(xr.stop).not.toHaveBeenCalled();
   });
   it("retries loading the engine after a script failure rather than caching a rejected promise", async () => {
     const events = new EventTarget();

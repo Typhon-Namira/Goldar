@@ -1,10 +1,10 @@
-# Goldar — Digital Jewelry Atelier
+# Goldar — Interactive Jewelry Windows
 
-Goldar is a multi-tenant jewelry catalog platform with a private admin studio, premium public catalog pages, individual product URLs, QR codes, GLB/USDZ storage and native device AR scene placement.
+Goldar turns a jewelry shop display and webcam into a live try-on mirror. Each store has one public display link, a product rail, and raised-hand swipes for touch-free selection. A private admin studio manages stores, manually authored jewelry GLBs, cover images, publication and fitting calibration. See [display setup and operation](docs/INTERACTIVE_WINDOW.md).
 
 ## Current implementation status
 
-- Implemented: single-superadmin API login, store/product CRUD, publication control, responsive luxury catalog, 3D viewer, native AR environment placement (compatible iOS Quick Look / Android Scene Viewer), per-product AR routes, QR codes, S3-compatible presigned uploads.
+- Implemented: fullscreen portrait/landscape store displays, local wrist-swipe selection, live earring/necklace swaps in one camera session, operator fullscreen/wake-lock controls, single-superadmin login, store/product CRUD, publication control, per-product calibration previews, QR links and S3-compatible presigned uploads. Existing individual product/3D viewer and native scene-placement routes remain available.
 - Face Atelier: local 8th Wall face/ear tracking for earrings and MediaPipe body/neck fitting for necklaces. No WiLoR endpoint or server inference is used. Model calibration is saved per product. See [setup, model preparation and deployment](docs/FACE_ATELIER.md).
 - Not validated: physical sizing, general hair/clothing occlusion, dangling-earring physics, and production accuracy/performance across physical iOS/Android devices. Necklaces use shoulder landmarks and an optional exposed-neck outline; fitting remains an approximate visual preview.
 
@@ -12,9 +12,9 @@ Goldar is a multi-tenant jewelry catalog platform with a private admin studio, p
 
 ```
 backend/                FastAPI / SQLAlchemy API
-frontend/               Next.js admin and public catalog
+frontend/               Next.js admin and live store displays
 frontend/src/app/admin  Owner-only studio console
-frontend/src/app/s      Public jewelry catalogs
+frontend/src/app/s      Public interactive shop windows
 frontend/src/app/ar     Product-specific AR scene placement
 ```
 
@@ -57,4 +57,4 @@ Replace development secrets, enforce HTTPS and strict CORS, add login throttling
 
 ## Next milestone
 
-Validate Face Atelier on physical iPhone Safari and Android Chrome, calibrate merchant earring/necklace assets, and measure browser tracking performance. Validate the shoulder/neck fit with exposed and partially covered necks; physical sizing still requires separate calibration.
+Validate the shop-window experience on the actual display computer/webcam, including hand swipes, street lighting, glass reflections and prolonged use. Calibrate merchant earring/necklace assets and measure browser tracking performance. Validate the shoulder/neck fit with exposed and partially covered necks; physical sizing still requires separate calibration.

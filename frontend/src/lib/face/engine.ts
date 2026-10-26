@@ -1,3 +1,4 @@
+import { SwipeDetector, type SwipeDirection } from "../kiosk/swipe";
 import { NecklaceRig } from "./necklace-rig";
 import { neckSurface } from "./neck-surface";
 import { StableNeckFrame } from "./body-stability";
@@ -58,6 +59,10 @@ async function loadEngine(): Promise<XR8Engine> {
   return loadingEngine;
 }
 export class FaceEngine {
+  private assetVersion = 0;
+  private assetRequest = 0;
+  private swipe = new SwipeDetector();
+  private modelError = "";
   private disposed = false;
   private trackingFailed = false;
   private xr: XR8Engine | null = null;
@@ -103,9 +108,14 @@ export class FaceEngine {
     private canvas: HTMLCanvasElement,
     private product: Product,
     private status: (s: string) => void,
+    private options: {
+      onSwipe?: (direction: SwipeDirection) => void;
+      onGestureError?: (message: string) => void;
+      onFatalError?: (message: string) => void;
+      onModelError?: (id: string) => void;
+    } = {},
   ) {
-    if (product.category === "earring")
-      this.lobeSurfaces = [new LobeSurface(), new LobeSurface()];
+    this.lobeSurfaces = [new LobeSurface(), new LobeSurface()];
     this.root.name = "GoldarFaceJewelry";
     this.left.name = "GoldarLeftJewelry";
     this.right.name = "GoldarRightJewelry";
@@ -132,56 +142,22 @@ export class FaceEngine {
     await xr.loadChunk("face");
     if (this.disposed) return;
     this.status("Loading your jewelry…");
-    const draco = new DRACOLoader().setDecoderPath("/vendor/three/draco/");
-    let gltf;
-    try {
-      gltf = await new GLTFLoader()
-        .setDRACOLoader(draco)
-        .setMeshoptDecoder(MeshoptDecoder)
-        .loadAsync(
-          this.product.glb_url === "/models/sample-necklace.glb"
-            ? this.product.glb_url + "?v=emerald-halo-rig2"
-            : this.product.glb_url,
-        );
-    } finally {
-      draco.dispose();
-    }
-
-    if (this.disposed) {
-      disposeModel(gltf.scene);
-      return;
-    }
-    this.model = gltf.scene;
-    if (
-      this.product.category === "necklace" &&
-      gltf.scene.userData.goldarNecklaceRig === 2
-    ) {
-      this.necklaceRig = new NecklaceRig(gltf.scene);
-      this.left.add(this.necklaceRig.root);
-    } else this.left.add(prepareJewelry(clone(gltf.scene), this.calibration));
-    if (this.product.category === "earring")
-      this.right.add(prepareJewelry(clone(gltf.scene), this.calibration));
-    if (this.product.category === "earring") {
-      this.lobeSurfaces.forEach(({ group }) => {
-        group.visible = false;
-        this.root.add(group);
-      });
-    }
-    if (this.product.category === "necklace") {
-      if (!this.necklaceRig) {
-        const bounds = new T.Box3().setFromObject(this.left);
-        this.necklaceHalfWidth = Math.max(
-          1,
-          (bounds.max.x - bounds.min.x) * 80,
-        );
-      }
-      this.neckDepth = createNeckOccluder();
-      this.neckRoot.name = "GoldarBodyNecklace";
-      this.neckRoot.add(this.left, this.neckDepth);
-      this.neckRoot.visible = false;
+    await this.setProduct(this.product);
+    if (this.disposed) return;
+    this.lobeSurfaces.forEach(({ group }) => {
+      group.visible = false;
+      this.root.add(group);
+    });
+    this.root.add(this.occluder);
+    if (this.product.category === "necklace" || this.options.onSwipe) {
       this.body = new BodyPoseTracker(
         (pose) => {
-          if (!this.sceneCamera || this.disposed || !pose.neck) return;
+          if (this.disposed) return;
+          if (this.options.onSwipe && performance.now() - pose.time < 650) {
+            const direction = this.swipe.update(pose, this.facing === "front");
+            if (direction) this.options.onSwipe(direction);
+          }
+          if (this.product.category !== "necklace" || !this.sceneCamera || !pose.neck) return;
           const camera = this.sceneCamera;
           let depth = 1;
           if (this.lastSeen && performance.now() - this.lastSeen < 2000) {
@@ -235,6 +211,7 @@ export class FaceEngine {
         },
         (message) => {
           this.bodyError = message;
+          this.options.onGestureError?.(message);
         },
         (width, height) => {
           if (
@@ -253,13 +230,12 @@ export class FaceEngine {
           return point.y > 0 && point.y < 1 ? { chinY: point.y } : null;
         },
       );
-      this.root.add(this.occluder);
-    } else this.root.add(this.left, this.right, this.occluder);
+    }
     this.root.visible = false;
     this.occluder.renderOrder = -20;
     this.occluder.frustumCulled = false;
     xr.FaceController.configure({
-      enableEars: this.product.category === "earring",
+      enableEars: this.product.category === "earring" || !!this.options.onSwipe,
       maxDetections: 1,
       coordinates: { mirroredDisplay: facing === "front" },
     });
@@ -287,20 +263,9 @@ export class FaceEngine {
         light.position.set(1, 2, 3);
         this.lighting.add(light);
         scene.add(this.lighting, this.root, this.neckRoot);
-        if (this.necklaceRig) {
-          void renderer
-            .compileAsync(this.neckRoot, camera, scene)
-            .then(() => {
-              if (!this.disposed) this.materialsReady = true;
-            })
-            .catch(() => {
-              if (!this.disposed)
-                this.bodyError =
-                  "Unable to prepare the necklace materials. Reload to retry.";
-            });
-        }
+        void this.prepareMaterials(this.assetVersion);
         this.status(
-          this.body
+          this.product.category === "necklace"
             ? "Keep your neck and both shoulders in view."
             : "Look at the camera. Keep your face and ears in view.",
         );
@@ -334,7 +299,7 @@ export class FaceEngine {
               this.root.visible = false;
               this.faceId = null;
               this.faceChin = null;
-              if (!this.body)
+              if (this.product.category !== "necklace")
                 this.status("Face lost. Look towards the camera.");
             }
           },
@@ -352,7 +317,7 @@ export class FaceEngine {
         this.root.visible = false;
         this.faceId = null;
         this.faceChin = null;
-        if (!this.body) this.status("Looking for your face…");
+        if (this.product.category !== "necklace") this.status("Looking for your face…");
       }
     }, 200);
     const resize = () => {
@@ -374,6 +339,79 @@ export class FaceEngine {
       cameraConfig: { direction: facing },
       webgl2: true,
     });
+    if (this.trackingFailed) throw Error(this.bodyError);
+  }
+  /** Swap assets in the existing XR8 scene. Never reopen the webcam. */
+  async setProduct(product: Product): Promise<boolean> {
+    if (this.disposed) return false;
+    const request = ++this.assetRequest;
+    const calibration = resolveCalibration(product);
+    const decoder = new DRACOLoader().setDecoderPath("/vendor/three/draco/");
+    let gltf;
+    try {
+      gltf = await new GLTFLoader().setDRACOLoader(decoder)
+        .setMeshoptDecoder(MeshoptDecoder).loadAsync(
+          product.glb_url === "/models/sample-necklace.glb"
+            ? product.glb_url + "?v=emerald-halo-rig2" : product.glb_url,
+        );
+    } finally { decoder.dispose(); }
+    if (this.disposed || request !== this.assetRequest) {
+      disposeModel(gltf.scene);
+      return false;
+    }
+    const left = new T.Group(), right = new T.Group();
+    left.name = "GoldarLeftJewelry";
+    right.name = "GoldarRightJewelry";
+    let rig: NecklaceRig | null = null;
+    try {
+      if (product.category === "necklace" && gltf.scene.userData.goldarNecklaceRig === 2) {
+        rig = new NecklaceRig(gltf.scene);
+        left.add(rig.root);
+      } else left.add(prepareJewelry(clone(gltf.scene), calibration));
+      if (product.category === "earring")
+        right.add(prepareJewelry(clone(gltf.scene), calibration));
+    } catch (error) {
+      disposeModel(left, right, gltf.scene);
+      throw error;
+    }
+    const version = ++this.assetVersion;
+    this.left.removeFromParent(); this.right.removeFromParent();
+    disposeModel(this.left, this.right, ...(this.model ? [this.model] : []));
+    this.model = gltf.scene;
+    this.left = left; this.right = right;
+    this.product = product; this.calibration = calibration;
+    this.necklaceRig = rig; this.materialsReady = !rig; this.modelError = "";
+    this.lobeFilters.forEach((filter) => filter.reset());
+    this.lobeSurfaces.forEach((surface) => { surface.reset(); surface.group.visible = false; });
+    left.visible = right.visible = false;
+    this.neckRoot.visible = false;
+    if (product.category === "necklace") {
+      if (!rig) {
+        const bounds = new T.Box3().setFromObject(left);
+        this.necklaceHalfWidth = Math.max(1, (bounds.max.x - bounds.min.x) * 80);
+      }
+      if (!this.neckDepth) {
+        this.neckDepth = createNeckOccluder();
+        this.neckRoot.add(this.neckDepth);
+      }
+      this.neckRoot.name = "GoldarBodyNecklace";
+      this.neckRoot.add(left);
+    } else this.root.add(left, right);
+    if (this.sceneCamera) await this.prepareMaterials(version);
+    return !this.disposed && request === this.assetRequest && version === this.assetVersion;
+  }
+  private async prepareMaterials(version: number) {
+    if (!this.necklaceRig || !this.xr || !this.sceneCamera) return;
+    try {
+      const { renderer, camera, scene } = this.xr.Threejs.xrScene();
+      await renderer.compileAsync(this.neckRoot, camera, scene);
+      if (!this.disposed && version === this.assetVersion) this.materialsReady = true;
+    } catch {
+      if (!this.disposed && version === this.assetVersion) {
+        this.modelError = "Unable to prepare the necklace materials. Select another piece or retry.";
+        this.options.onModelError?.(this.product.id);
+      }
+    }
   }
   private failTracking(error: unknown) {
     if (this.disposed || this.trackingFailed) return;
@@ -386,6 +424,7 @@ export class FaceEngine {
         : "Camera tracking failed. Stop and retry.";
     this.body?.dispose();
     this.status(this.bodyError);
+    this.options.onFatalError?.(this.bodyError);
   }
   private geometry(data: GeometryData) {
     if (this.disposed || !Array.isArray(data.indices)) return;
@@ -528,8 +567,13 @@ export class FaceEngine {
     this.root.visible = true;
   }
   private updateBody() {
-    if (!this.body || this.disposed) return;
+    if (!this.body || this.disposed || this.product.category !== "necklace") return;
     const now = performance.now();
+    if (this.modelError) {
+      this.neckRoot.visible = false;
+      this.status(this.modelError);
+      return;
+    }
     if (this.necklaceRig && !this.materialsReady && !this.bodyError) {
       this.neckRoot.visible = false;
       this.status("Preparing the necklace finish…");
