@@ -31,6 +31,7 @@ export class NecklaceRig {
       surface.height.toFixed(1),
       surface.drop.toFixed(1),
       detailScale.toFixed(3),
+      surface.viewDirection?.map((v) => v.toFixed(3)),
     ]);
     if (key === this.key) return;
     this.key = key;
@@ -78,8 +79,10 @@ export class NecklaceRig {
       0.001,
     );
     this.pendant.position.copy(front);
-    this.pendant.position.z += 0.0015;
-    this.pendant.rotation.x = -Math.atan(0.32);
+    const [vx, vz] = surface.viewDirection ?? [0, 1];
+    const bearing = new Vector3(vx, 0, vz).normalize();
+    this.pendant.position.addScaledVector(bearing, 0.0015);
+    this.pendant.rotation.set(-Math.atan(0.32), Math.atan2(vx, vz), 0, "YXZ");
     this.pendant.scale.setScalar(detailScale);
     this.clasp.position.set(...chainPoint(surface, 0.75)).multiplyScalar(0.001);
     this.clasp.scale.setScalar(detailScale);

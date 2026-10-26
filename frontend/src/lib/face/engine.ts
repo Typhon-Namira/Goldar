@@ -541,6 +541,15 @@ export class FaceEngine {
       ((50 * this.calibration.height_mm) / 85) * this.fit,
     );
     if (this.necklaceRig) {
+      const bearing = this.sceneCamera!
+        .getWorldPosition(new T.Vector3())
+        .sub(fit.position)
+        .applyQuaternion(fit.rotation.clone().invert());
+      // Leave a rear-facing body's pendant on its anatomical front, hidden.
+      if (bearing.z > 0) {
+        const length = Math.hypot(bearing.x, bearing.z);
+        surface.viewDirection = [bearing.x / length, bearing.z / length];
+      }
       this.left.scale.setScalar(1);
       this.necklaceRig.update(surface, this.fit);
     } else {

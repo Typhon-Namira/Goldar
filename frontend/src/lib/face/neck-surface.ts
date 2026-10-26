@@ -5,6 +5,8 @@ export type NeckSurface = {
   height: number;
   drop: number;
   clearance: number;
+  /** Camera bearing in body-local XZ; only the articulated preview uses it. */
+  viewDirection?: [number, number];
 };
 export function neckSurface(
   radius: number,
@@ -51,6 +53,18 @@ export function chainPoint(
     s = Math.sin(angle),
     c = Math.cos(angle);
   const y = s < 0 ? 9 * (-s) ** 1.2 : -surface.drop * s ** 1.8;
+  if (surface.viewDirection) {
+    // Route around the same depth surface, but let the visible drape descend
+    // along the viewing meridian. Noisy monocular shoulder yaw must not move
+    // the lowest link/pendant away from the observed neck centreline.
+    const section = bodySection(surface, y);
+    const radius = section.radius + surface.clearance;
+    const depth = section.depth + surface.clearance;
+    const [vx, vz] = surface.viewDirection;
+    const front = Math.atan2(vz / depth, vx / radius);
+    const theta = angle + front - Math.PI / 2;
+    return [radius * Math.cos(theta), y, depth * Math.sin(theta)];
+  }
   const neck = bodySection(surface, Math.max(0, y));
   const x = (neck.radius + surface.clearance) * c;
   let z = (neck.depth + surface.clearance) * s;

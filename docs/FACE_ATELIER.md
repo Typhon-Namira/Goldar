@@ -81,6 +81,16 @@ they are not a representation of a merchant's actual jewelry.
   against jaw/chest misidentification; body yaw remains shoulder-driven.
   The observed neck section continues downward before the chest surface flares;
   raycast regressions check projected side boundaries within two video pixels.
+  Shoulder yaw still orients the contact volume, but shoulder height imbalance
+  no longer rolls the collar. The preview uses camera-up as its rest vertical
+  (not a measured gravity sensor). For the articulated demo, the lowest link
+  and pendant follow the viewing meridian of that same elliptical contact
+  surface. This keeps the pendant on the observed neck image centreline under
+  noisy shoulder depth, without translating the side contacts or depth mask.
+  The pendant clearance and facing use the same bearing. Rear-facing bodies
+  retain the anatomical front, with the pendant occluded. This is a preview
+  drape constraint, not a physical cloth/jewelry simulation; rigid uploaded
+  merchant models retain their calibration and do not acquire this rig.
   Shader preparation happens before the rig is revealed. Link/pendant sizing
   changes never expand the collar away from the measured neck.
   Uploaded GLBs without this explicit rig remain rigid calibrated previews;
@@ -149,7 +159,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 54 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 56 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission
@@ -164,3 +174,10 @@ video mapping. A full Chromium photographic fitting check with a collared
 astronaut portrait did not acquire a valid neck contour (the preview remained
 hidden); it is not evidence of successful human fitting. Validation on exposed
 necks and real phones is still required for anatomical accuracy.
+
+The centering regressions load and refit the actual necklace GLB, then project
+its pendant under asymmetric shoulder heights/depths, both mirror modes,
+off-centre necks and portrait cover-crop. Pendant attachment stays within one
+viewport pixel of the fitted neck centreline. Additional raycasts verify one
+connected visible arc and hidden rear links after recentering. Phone imagery
+is still required to judge real anatomical alignment.

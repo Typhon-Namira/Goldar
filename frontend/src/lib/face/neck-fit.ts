@@ -90,11 +90,15 @@ export function fitNeck(
     Math.max(-0.3, Math.min(0.3, left.z - right.z)) * screenWidth;
   l.addScaledVector(forward, difference / 2);
   r.addScaledVector(forward, -difference / 2);
-  const x = (mirrored ? r.clone().sub(l) : l.clone().sub(r)).normalize();
+  const shoulderAxis = (
+    mirrored ? r.clone().sub(l) : l.clone().sub(r)
+  ).normalize();
   const up = new Vector3(0, 1, 0).applyQuaternion(
     camera.getWorldQuaternion(new Quaternion()),
   );
-  up.addScaledVector(x, -up.dot(x)).normalize();
+  // Shoulder height asymmetry is not gravity: a raised/cropped shoulder must
+  // not roll the entire collar and swing the pendant sideways. Retain yaw.
+  const x = shoulderAxis.addScaledVector(up, -shoulderAxis.dot(up)).normalize();
   const z = x.clone().cross(up).normalize();
   const width = l.distanceTo(r);
   const mm = width / 380;
