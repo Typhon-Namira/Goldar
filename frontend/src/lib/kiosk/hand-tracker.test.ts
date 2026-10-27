@@ -159,3 +159,16 @@ it("does not navigate using a result delayed by a backgrounded or overloaded bro
   expect(swipe).not.toHaveBeenCalled();
   tracker.dispose();
 });
+
+it('filters other visitors hands before trajectory association without losing the owner hand',async()=>{
+ vi.stubGlobal('createImageBitmap',vi.fn().mockResolvedValue({close:vi.fn()}));
+ const swipe=vi.fn(),v=video(),tracker=new HandSwipeTracker(swipe,vi.fn(),true,p=>p[0].x<.5);
+ tracker.start(v);const worker=WorkerStub.current;worker.send({type:'ready'});
+ const palm=(x:number,y:number)=>Array.from({length:21},(_,i)=>({x:x+(i%5)*.015,y:y+Math.floor(i/5)*.02}));
+ for(let i=0;i<3;i++){
+  await vi.advanceTimersByTimeAsync(90);const frame=worker.postMessage.mock.calls.at(-1)![0];
+  worker.send({type:'hands',time:frame.time,landmarks:[palm(.7,.2+i*.15),palm(.3,i===2?.4:.2)],handedness:['Right','Left']});v.currentTime++;
+  if(i<2)expect(swipe).not.toHaveBeenCalled();
+ }
+ expect(swipe).toHaveBeenCalledTimes(1);expect(swipe).toHaveBeenCalledWith(1);tracker.dispose();
+});

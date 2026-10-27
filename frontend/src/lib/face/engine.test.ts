@@ -4,7 +4,8 @@ import type { Product } from "../api";
 import type { BodyPose } from "./body-pose";
 import type { PipelineModule, FaceData } from "./types";
 import { FaceEngine } from "./engine";
-const hooks = vi.hoisted(() => ({ pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn(), profileReset: vi.fn(), block: null as Promise<void> | null }));
+vi.mock("../kiosk/face-quality",()=>({FaceQualityTracker:class {constructor(failed:()=>void){hooks.qualityFailed=failed;} start(){} sample(){} usable(){return true;} dispose(){}}}));
+const hooks = vi.hoisted(() => ({ qualityFailed:null as null|(()=>void), pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn(), profileReset: vi.fn(), block: null as Promise<void> | null }));
 vi.mock("./body-pose", () => ({ BodyPoseTracker: class {
   constructor(result: (pose: BodyPose) => void) { hooks.pose = result; }
   start() {}
@@ -50,7 +51,7 @@ async function start(category: string, options: ConstructorParameters<typeof Fac
   const status = vi.fn();
   engine = new FaceEngine(canvas, { category, glb_url: "/fixture.glb" } as Product, status, options);
   await engine.start("front");
-  return { scene, module, status, xr, previousEnvironment };
+  return { scene, module, status, xr, previousEnvironment, canvas, camera };
 }
 describe("jewelry engine lifecycle", () => {
   it("hides the necklace and stops inference on a camera exception, including later render updates", async () => {
@@ -198,6 +199,33 @@ describe("jewelry engine lifecycle", () => {
     }
     expect(append).toHaveBeenCalledTimes(2);
     expect(removed).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps visitor ownership through face loss and transforms the composite, not the tracking camera",async()=>{
+    const {scene,module,canvas,camera}=await start("necklace",{autoFrame:true});
+    const projection=camera.projectionMatrix.toArray(),position=camera.position.toArray();
+    module.onCameraStatusChange?.({status:'hasVideo',video:{videoWidth:640,videoHeight:480} as HTMLVideoElement});
+    const face=(id:number):FaceData=>({id,transform:{position:{x:0,y:0,z:-1},rotation:{x:0,y:0,z:0,w:1},scale:1,scaledWidth:1},attachmentPoints:{},vertices:Array.from({length:40},(_,i)=>({x:Math.cos(i*Math.PI/20)*.12,y:Math.sin(i*Math.PI/20)*.18,z:0}))});
+    const emit=(name:string,detail:unknown)=>module.listeners!.find(l=>l.event==='facecontroller.'+name)!.process({detail});
+    for(let i=0;i<12;i++){emit('faceupdated',face(1));module.onUpdate!();await vi.advanceTimersByTimeAsync(100);}
+    expect(canvas.style.transform).toContain('matrix(');expect(canvas.style.transform).not.toContain('NaN');
+    const root=scene.getObjectByName('GoldarFaceJewelry')!;
+    expect(hooks.profileReset).toHaveBeenCalledTimes(1);
+    emit('facelost',{id:1});const other=face(2);other.transform.position.x=.1;emit('faceupdated',other);
+    expect(root.visible).toBe(false);expect(root.position.x).toBe(0);
+    await vi.advanceTimersByTimeAsync(1400);module.onUpdate!();emit('faceupdated',other);expect(root.position.x).toBe(0);expect(hooks.profileReset).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(800);module.onUpdate!();
+    expect(canvas.style.transform).toBe('matrix(1,0,0,1,0,0)');
+    await vi.advanceTimersByTimeAsync(350);emit('faceupdated',other);expect(root.position.x).toBe(.1);
+    expect(camera.projectionMatrix.toArray()).toEqual(projection);expect(camera.position.toArray()).toEqual(position);
+  });
+
+  it("falls back to normal live fitting if optional framing quality is unavailable",async()=>{
+    const {scene,module,canvas}=await start("necklace",{autoFrame:true});
+    hooks.qualityFailed?.();
+    const points=Array.from({length:33},()=>({x:.5,y:.6,z:0,visibility:1}));points[11].x=.7;points[12].x=.3;
+    hooks.pose!({points,neck:{left:.44,right:.56,y:.5},time:performance.now(),width:640,height:480});module.onUpdate!();
+    expect(scene.getObjectByName('GoldarBodyNecklace')!.visible).toBe(true);expect(canvas.style.transform).toBe('none');
   });
 
 });

@@ -144,3 +144,10 @@ Overlapping palm detections are deduplicated before hand association. Nearby
 crop/handedness reacquisition preserves the consumed-sweep latch while reseeding
 coordinates; it cannot create a second armed gesture from the tail of the same
 sweep. Both cases have explicit regression coverage.
+
+The shop mirror automatically frames one stable, sufficiently clear visitor's
+upper body. Zoom is applied to the camera/model composite; the product rail
+stays fixed. The crop holds through small tracking noise and returns wide after
+departure before admitting another visitor. See [AUTO_FRAMING.md](AUTO_FRAMING.md)
+for eligibility, smoothing, ownership and optical limitations. No body reference
+marker or measurement mode is required or added.

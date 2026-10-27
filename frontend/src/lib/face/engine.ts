@@ -1,3 +1,6 @@
+import { AutoFramer } from "../kiosk/auto-frame";
+import { FaceQualityTracker } from "../kiosk/face-quality";
+import { projectFace } from "../kiosk/face-projection";
 import type { SwipeDirection } from "../kiosk/swipe";
 import { HandSwipeTracker } from "../kiosk/hand-tracker";
 import { estimatedNeck } from "./neck-observation";
@@ -62,6 +65,12 @@ async function loadEngine(): Promise<XR8Engine> {
   return loadingEngine;
 }
 export class FaceEngine {
+  private framing = new AutoFramer();
+  private faceQuality:FaceQualityTracker|null=null;
+  private sourceVideo:HTMLVideoElement|null=null;
+  private lastCrop="";
+  private framePhase="wide";
+  private autoFrameEnabled=false;
   private assetVersion = 0;
   private assetRequest = 0;
   private hand: HandSwipeTracker | null = null;
@@ -116,6 +125,7 @@ export class FaceEngine {
     private product: Product,
     private status: (s: string) => void,
     private options: {
+      autoFrame?:boolean;
       onSwipe?: (direction: SwipeDirection) => void;
       onGestureError?: (message: string) => void;
       onFatalError?: (message: string) => void;
@@ -133,6 +143,12 @@ export class FaceEngine {
   }
   async start(facing: "front" | "back") {
     this.facing = facing;
+    this.autoFrameEnabled=!!this.options.autoFrame;
+    if(this.autoFrameEnabled)this.faceQuality=new FaceQualityTracker(()=>{
+      this.autoFrameEnabled=false;this.framing.reset();this.lastCrop='';
+      if(this.canvas.style)this.canvas.style.transform='none';
+      if(this.canvas.dataset)this.canvas.dataset.framing='wide';
+    });
     this.status(
       this.product.category === "necklace"
         ? "Loading camera and body tracking…"
@@ -160,6 +176,10 @@ export class FaceEngine {
       this.body = new BodyPoseTracker(
         (pose) => {
           if (this.disposed) return;
+          if(this.autoFrameEnabled){
+            const a=pose.points[11],b=pose.points[12];
+            if(this.faceId!==this.framing.ownerId()||!a||!b||!this.framing.matchesBody(a,b,performance.now()))return;
+          }
           if (this.product.category !== "necklace" || !this.sceneCamera) return;
           this.neckEstimated = !pose.neck;
           if (!pose.neck) {
@@ -241,6 +261,12 @@ export class FaceEngine {
       this.options.onSwipe,
       () => this.options.onGestureError?.("Hand tracking unavailable"),
       facing === "front",
+      this.options.autoFrame ? (points)=>{
+        if(!this.autoFrameEnabled)return true;
+        if(points.length<18||this.faceId!==this.framing.ownerId())return false;
+        const palm=[0,5,9,13,17].map(i=>points[i]);
+        return palm.every(Boolean)&&this.framing.allowsHand(palm.reduce((s,p)=>s+p.x,0)/5,palm.reduce((s,p)=>s+p.y,0)/5,performance.now());
+      } : undefined,
     );
     this.root.visible = false;
     this.occluder.renderOrder = -20;
@@ -255,11 +281,13 @@ export class FaceEngine {
       onCameraStatusChange: ({ status, video }) => {
         if (status === "failed") this.failTracking("Camera unavailable. Stop and retry.");
         else if (!this.trackingFailed && status === "hasVideo" && video) {
+          this.sourceVideo=video;
+          this.faceQuality?.start(video);
           this.body?.start(video);
           this.hand?.start(video);
         }
       },
-      onUpdate: () => this.updateBody(),
+      onUpdate: () => {this.updateFraming();this.updateBody();},
       onStart: () => {
         if (this.disposed) return;
         const { scene, renderer, camera } = xr.Threejs.xrScene();
@@ -337,6 +365,7 @@ export class FaceEngine {
       const parent = this.canvas.parentElement;
       const width = Math.max(1, parent?.clientWidth ?? window.innerWidth);
       const height = Math.max(1, parent?.clientHeight ?? window.innerHeight);
+      if(this.autoFrameEnabled&&(this.canvas.width!==width||this.canvas.height!==height)){this.framing.reset();this.lastCrop='';}
       if (this.canvas.width !== width) this.canvas.width = width;
       if (this.canvas.height !== height) this.canvas.height = height;
       this.canvas.style.width = "100%";
@@ -437,6 +466,9 @@ export class FaceEngine {
         : "Camera tracking failed. Stop and retry.";
     this.body?.dispose();
     this.hand?.dispose();
+    this.faceQuality?.dispose();
+    this.framing.reset();
+    if(this.options.autoFrame&&this.canvas.style)this.canvas.style.transform='none';
     this.status(this.bodyError);
     this.options.onFatalError?.(this.bodyError);
   }
@@ -455,6 +487,7 @@ export class FaceEngine {
       !Array.isArray(face.vertices)
     )
       return;
+    if(this.autoFrameEnabled&&!this.framing.accepts(face.id))return;
     if (this.faceId !== null && this.faceId !== face.id) return;
     const t = face.transform,
       q = t.rotation;
@@ -464,6 +497,16 @@ export class FaceEngine {
       t.scale <= 0
     )
       return;
+    if(this.autoFrameEnabled&&this.sceneCamera&&this.sourceVideo){
+      const now=performance.now();
+      const observation=projectFace(face,this.sceneCamera,{width:this.canvas.width,height:this.canvas.height},
+        {width:this.sourceVideo.videoWidth,height:this.sourceVideo.videoHeight},this.facing==='front',now);
+      if(observation){
+        this.faceQuality?.sample(face.id,observation.source,now);
+        observation.quality=this.faceQuality?.usable(face.id,now)??false;
+        if(!this.framing.observe(observation))return;
+      }else if(this.framing.ownerId()!==null)return;
+    }
     if (this.faceId !== face.id) {
       this.lobeFilters.forEach((filter) => filter.reset());
       this.lobeSurfaces.forEach((surface) => surface.reset());
@@ -591,8 +634,25 @@ export class FaceEngine {
     } else this.occluder.visible = false;
     this.root.visible = true;
   }
+  private updateFraming(){
+    if(!this.autoFrameEnabled||this.disposed)return;
+    const crop=this.framing.update(performance.now());
+    const width=this.canvas.clientWidth||this.canvas.width,height=this.canvas.clientHeight||this.canvas.height;
+    const matrix=`matrix(${crop.scale},0,0,${crop.scale},${crop.x*width},${crop.y*height})`;
+    if(matrix!==this.lastCrop){this.canvas.style.transformOrigin='0 0';this.canvas.style.transform=matrix;this.lastCrop=matrix;}
+    const phase=this.framing.phase();
+    if(phase!==this.framePhase&&(phase==='focused'||phase==='returning')){
+      this.body?.resetProfile();this.bootstrapProfile=new NeckProfileMemory();
+      this.neckFit=null;this.neckReceived=-Infinity;this.bodyStability=new StableNeckFrame();
+      if(phase==='returning'){this.faceChin=null;this.bodyFaceId=null;}
+    }
+    this.framePhase=phase;
+    if(this.canvas.dataset)this.canvas.dataset.framing=phase;
+    if(phase==='returning'){this.root.visible=false;this.neckRoot.visible=false;}
+  }
   private updateBody() {
     if (!this.body || this.disposed || this.product.category !== "necklace") return;
+    if(this.autoFrameEnabled&&(this.framing.phase()!=='focused'||this.faceId!==this.framing.ownerId()||performance.now()-this.lastSeen>650)){this.neckRoot.visible=false;return;}
     const now = performance.now();
     if (this.modelError) {
       this.neckRoot.visible = false;
@@ -664,8 +724,12 @@ export class FaceEngine {
     this.disposed = true;
     if (this.watchdog) clearInterval(this.watchdog);
     this.resizeObserver?.disconnect();
+    this.sourceVideo=null;
     this.body?.dispose();
     this.hand?.dispose();
+    this.faceQuality?.dispose();
+    this.framing.reset();
+    if(this.options.autoFrame&&this.canvas.style)this.canvas.style.transform='none';
     this.xr?.stop();
     this.root.removeFromParent();
     this.neckRoot.removeFromParent();

@@ -14,6 +14,7 @@ export default function WindowRuntime({ products, initialId, facing }: {
     };
     const engine = new FaceEngine(canvas.current, current,
       (message) => send({ type: "goldar-window-status", message }), {
+        autoFrame:true,
         onSwipe: (direction) => send({ type: "goldar-window-swipe", direction }),
         onGestureError: () => send({ type: "goldar-window-gesture-error" }),
         onFatalError: (message) => send({ type: "goldar-window-error", message }),
@@ -53,5 +54,5 @@ export default function WindowRuntime({ products, initialId, facing }: {
       engine.dispose();
     };
   }, [products, initialId, facing]);
-  return <main lang="hy" style={{ position: "fixed", inset: 0 }}><canvas ref={canvas} aria-label="Live jewelry mirror" style={{ position: "fixed", inset: 0, width: "100%", height: "100%", background: "#10130f" }} /></main>;
+  return <main lang="hy" style={{ position: "fixed", inset: 0, overflow:"hidden",background:"#10130f" }}><canvas ref={canvas} aria-label="Live jewelry mirror" style={{ position: "fixed", inset: 0, width: "100%", height: "100%", willChange:"transform", background: "#10130f" }} /></main>;
 }

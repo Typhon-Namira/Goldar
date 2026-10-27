@@ -1,3 +1,4 @@
+import type { HandPoint } from "./hand-swipe";
 import { HandSwipeDetector } from "./hand-swipe";
 import type { SwipeDirection } from "./swipe";
 export class HandSwipeTracker {
@@ -17,6 +18,7 @@ export class HandSwipeTracker {
     private swipe: (direction: SwipeDirection) => void,
     private failed: () => void,
     private mirrored: boolean,
+    private eligible?: (points:HandPoint[])=>boolean,
   ) {}
   start(video: HTMLVideoElement) {
     if (this.worker || this.disposed) return;
@@ -39,12 +41,13 @@ export class HandSwipeTracker {
           if (performance.now() - data.time > 350) {
             this.detector = new HandSwipeDetector();
           } else if (data.time >= this.sceneUntil) {
+            const entries=(data.landmarks as HandPoint[][]).map((points,index)=>({points,label:data.handedness?.[index]})).filter(entry=>!this.eligible||this.eligible(entry.points));
             const direction = this.detector.update(
-              data.landmarks,
+              entries.map(e=>e.points),
               data.time,
               this.mirrored,
               this.aspect,
-              data.handedness,
+              entries.map(e=>e.label),
             );
             if (direction) this.swipe(direction);
           }
