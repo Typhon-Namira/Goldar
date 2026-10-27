@@ -104,3 +104,24 @@ Full archive SHA256:
 The checked-in Lite model remains available for reproducibility; production
 necklace tracking requests Full. This adds approximately 9 MB to first-use
 model downloads and increases client CPU inference cost, not server inference.
+
+### Fast vertical-gesture bundle
+
+The shop mirror now requests `hand_landmarker_fast.task` (approximately 4.3 MB):
+Full palm detection plus Lite hand landmarks from the same pinned Apache-2.0
+`@mediapipe/hands@0.4.1675469240` package. The loader identifies the Full palm
+model at bytes 11–2341291 of `hands_solution_packed_assets.data`; the landmark
+model is `hand_landmark_lite.tflite`. Input normalization is 0/255; all tensor
+buffers are verified unchanged. This keeps the stronger palm acquisition model
+without the Full landmark model's extra inference cost. The worker uses IMAGE
+mode with independent temporal gesture tracks and bounded local search crops.
+
+```bash
+python scripts/repack-hand-model.py --source-dir /path/to/package \
+  --schema-dir /path/to/tensorflow_lite_support/metadata --variant fast \
+  --output public/models/tracking/hand_landmarker_fast.task
+```
+
+SHA256: `eb3524b0ac7106c2f3276e8f13213d5e142f4475f5f8c624147ce653d0fcf2e0`.
+Reproduction was verified byte-for-byte with flatbuffers 25.12.19 and numpy 2.5.4.
+The historical Lite archive remains checked in; the mirror requests Fast.

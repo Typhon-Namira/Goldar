@@ -23,12 +23,15 @@ still needs an operator action under browser policy. Screen wake lock is
 requested when supported. A camera-off/retry icon represents camera failure;
 model errors use a retry icon. No Persian or other visible UI wording is used.
 
-One raised hand sweeping horizontally selects a product. Direction refers to
-the mirrored display. Selection wraps at the ends. Icon cards and arrow keys
-remain operator fallbacks. Place the webcam near eye level and frame the ears,
-neck, shoulders and a raised hand at the actual standing position. Validate the
-real glass, street lighting, distance, exposure and prolonged use before leaving
-a display unattended. This is not multi-person fitting or physical sizing.
+Move either hand **down** to select the next/lower product in the right rail,
+or **up** to select the previous/upper product. Selfie mirroring never reverses
+this vertical mapping. One continuous sweep selects one product; pause briefly
+or reverse to begin another. Selection wraps at the ends. Icon cards and the
+Up/Down arrow keys remain operator fallbacks. Place the webcam near eye level
+and frame the ears, neck, shoulders and a raised hand at the actual standing
+position. Validate the real glass, street lighting, distance, exposure and
+prolonged use before leaving a display unattended. This is not multi-person
+fitting or physical sizing.
 
 ## Tracking and fitting
 
@@ -36,20 +39,40 @@ A single XR8 camera stream/scene persists across product swaps. Failed GLB
 requests preserve the current asset; superseded loads are disposed. Same-origin
 iframe messages validate origin/source and allow only the published inventory.
 
-Gesture control uses an independent CPU MediaPipe HandLandmarker worker and
-palm-centre trajectories. It does not require shoulder landmarks. Only one
-320px image is in flight; capture follows each completed inference with a 33ms
-fallback poll. A coherent fast pair (20–240ms, at least .065 normalized travel)
-can select a product without waiting for a third frame. Palm shape/scale,
-velocity and vertical drift reject implausible jumps. Slower three-frame sweeps
-remain supported. A 300ms refractory period plus pause/exit/reversal rearming
-prevents one continuous sweep from skipping products. Brief missing detections
-up to 180ms retain motion history to tolerate blur. Actual throughput depends
-on inference speed and camera frame rate, rather than a guaranteed 30Hz.
+Gesture control uses an independent CPU MediaPipe HandLandmarker worker on
+the existing camera. Its fast bundle combines Google's Full palm detector with
+Lite hand landmarks. Image-mode detection refreshes palms every frame rather
+than letting persistent video ROIs lock onto resting hands. A cheap local-motion
+map proposes a square search crop for newly raised or quickly moving hands;
+ONLY a confirmed learned-model hand becomes a gesture sample. Crop landmarks
+are mapped back to original video coordinates before motion/identity matching.
+Search focus expires after 500ms without motion, returning to the full frame;
+global scene changes clear it. A failed crop falls back to full-frame detection.
+No optical/image motion can directly select a product. It observes up to two hands; handedness and geometric palm
+association preserve identity when result ordering changes. Each palm has its
+own gesture trajectory, with a shared 180ms refractory period so two hands
+moving together cannot skip an extra product. It does not need body landmarks.
+
+Only one image (up to 480px on the longest edge) is in flight. Capture follows
+video-frame callbacks and completed inference, with a 33ms poll only on browsers
+without frame callbacks. Results older than 350ms clear gesture history instead
+of issuing delayed navigation. Aspect changes also reset history. Palm movement
+is measured in image-height units, independent of camera aspect and mirroring.
+
+A coherent fast pair (16–360ms, travel at least .045 image heights and .48 palm
+spans) can select without a dwell or a third frame. Palm shape is aligned for
+natural wrist rotation before comparison. Scale, shape, speed and horizontal
+drift reject disconnected detections. Slower deliberate trajectories are also
+supported. Pause/exit/reversal rearming consumes each continuous sweep once;
+rearming discards its old trajectory so a settled tail cannot replay. A brief
+missing detection can reconnect to the same palm within 360ms.
+
 Selections during an asset download retain the latest requested destination;
-they are not silently dropped by a loading lock. Abrupt whole-image changes
-clear gesture history and allow 180ms for the hand model to settle; ordinary
-local hand movement does not trigger this guard.
+they are not silently dropped by a loading lock. The rail scrolls the pending
+product into view immediately, while the confirmed outline follows successful
+model loading. Abrupt whole-image changes clear gesture history and allow
+180ms for the model to settle. All camera data stays local. Throughput depends
+on device inference speed, camera FPS and exposure; it is not guaranteed 30Hz.
 
 For necklaces, the measured upper-neck contact row is preferred and a median
 of three body-relative measurements rejects isolated silhouette errors. A
@@ -100,3 +123,24 @@ Necklace body inference uses the locally hosted BlazePose Full bundle (roughly
 capture-aligned chin references. This increases client CPU/model download cost;
 it adds no EC2 inference requirement. Setup and limitations are documented in
 FACE_ATELIER.md under “Necklace measurement refinement”.
+
+
+Vertical gesture validation uses 118 frontend regression tests, including both
+hand identities, reordered results, wrist rotation, portrait/wide aspect ratios,
+slow and fast flicks, continuous-sweep deduplication, stale-result rejection and
+video-callback cleanup. Four real CPU-model photo-motion runs (up/down in both
+portrait and landscape) each produced exactly one selection, first recognized
+on the first moving frame after a stationary baseline. These are repeatable
+inference checks, not a substitute for an onsite pedestrian/webcam test.
+
+
+The 360ms observation-gap limit supports slow camera/inference cadence without
+adding a dwell on fast devices. Low-latency two-frame detection still fires as
+soon as adequate motion is observed. Headless software rendering is useful for
+regression checks but does not establish physical-camera recognition latency.
+
+
+Overlapping palm detections are deduplicated before hand association. Nearby
+crop/handedness reacquisition preserves the consumed-sweep latch while reseeding
+coordinates; it cannot create a second armed gesture from the tail of the same
+sweep. Both cases have explicit regression coverage.

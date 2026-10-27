@@ -16,3 +16,6 @@
 @media(min-width:1600px){.mirror-catalog{width:118px;right:28px;padding:10px}.mirror-product{flex-basis:112px}.mirror-product>svg{width:66px;height:78px}.mirror-tools{bottom:28px}}
 @media(max-width:600px){.mirror-catalog{right:10px;top:20px;bottom:88px;width:72px;padding:6px;border-radius:10px}.mirror-product{flex-basis:72px;padding:8px}.mirror-product>svg{width:44px;height:52px}.mirror-rail{gap:9px}.mirror-tools{gap:5px;padding:6px;bottom:15px}.mirror-tools button{min-width:40px;height:40px;padding:8px}.mirror-hand{height:40px;padding:6px;gap:4px}.mirror-logo{top:20px;left:16px;max-width:78px;max-height:32px}.mirror-retry{left:12px;bottom:15px}}
 @media(prefers-reduced-motion:reduce){.store-window *{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* The gesture hint follows the same vertical axis as the product rail. */
+.mirror-hand{flex-direction:column;gap:0;min-width:48px;padding:2px 10px}.mirror-hand>svg{flex-shrink:0}.mirror-hand>svg:first-child,.mirror-hand>svg:last-child{height:9px;transition:color .1s,transform .1s}.mirror-hand>svg:nth-child(2){height:18px}

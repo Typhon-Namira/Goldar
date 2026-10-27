@@ -33,9 +33,9 @@ export default function WindowRuntime({ products, initialId, facing }: {
       }
     };
     const keys = (event: KeyboardEvent) => {
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();
-        send({ type: "goldar-window-swipe", direction: event.key === "ArrowRight" ? 1 : -1 });
+        send({ type: "goldar-window-swipe", direction: event.key === "ArrowDown" ? 1 : -1 });
       }
     };
     window.addEventListener("message", select);

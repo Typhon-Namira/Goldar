@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CameraOff, Hand, Maximize, RefreshCw, RotateCw, Gem } from "lucide-react";
+import { ArrowUp, ArrowDown, CameraOff, Hand, Maximize, RefreshCw, RotateCw, Gem } from "lucide-react";
 import type { Product, Store } from "@/lib/api";
 import { nextProductIndex, windowProducts } from "@/lib/kiosk/products";
 import "./store-window.css";
@@ -69,17 +69,17 @@ export default function StoreWindow({ store, products: inventory }: { store: Sto
       } else if (data.type === "goldar-window-gesture-error") setGestureError(true);
     };
     const keys = (event: KeyboardEvent) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       event.preventDefault();
-      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const direction = event.key === "ArrowDown" ? 1 : -1;
       select(nextProductIndex(intentRef.current, direction, products.length), direction);
     };
     window.addEventListener("message", message); window.addEventListener("keydown", keys);
     return () => { window.removeEventListener("message", message); window.removeEventListener("keydown", keys); };
   }, [products, select, clearPending]);
   useEffect(() => {
-    rail.current?.querySelector<HTMLElement>("[aria-pressed='true']")?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-  }, [selected]);
+    (rail.current?.querySelector<HTMLElement>(".is-loading") ?? rail.current?.querySelector<HTMLElement>("[aria-pressed='true']"))?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  }, [selected, pending]);
   useEffect(() => {
     let lock: WakeLockSentinel | undefined, cancelled = false;
     const acquire = async () => {
@@ -112,15 +112,15 @@ export default function StoreWindow({ store, products: inventory }: { store: Sto
       <aside className="mirror-catalog" aria-label="Jewelry">
         <div ref={rail} className="mirror-rail">
           {products.map((p, index) => <button key={p.id} className={"mirror-product" + (pending === p.id ? " is-loading" : "")}
-            aria-pressed={selected === index} aria-label={p.name} disabled={!ready || !!pending} onClick={() => select(index)}>
+            aria-pressed={selected === index} aria-busy={pending === p.id} aria-label={p.name} disabled={!ready || !!pending} onClick={() => select(index)}>
             <JewelryIcon necklace={p.category === "necklace"} />
             {p.cover_url && <img src={p.cover_url} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} />}
           </button>)}
         </div>
       </aside>
       <nav className="mirror-tools" aria-label="Mirror controls">
-        <div className={"mirror-hand" + (gestureError ? " is-unavailable" : "")} aria-label={gestureError ? "Gesture control unavailable" : "Swipe to select"}>
-          <ArrowLeft className={feedback === -1 ? "is-active" : ""} size={15} /><Hand size={21} /><ArrowRight className={feedback === 1 ? "is-active" : ""} size={15} />
+        <div className={"mirror-hand" + (gestureError ? " is-unavailable" : "")} aria-label={gestureError ? "Gesture control unavailable" : "Swipe down for next, up for previous"}>
+          <ArrowUp className={feedback === -1 ? "is-active" : ""} size={15} /><Hand size={21} /><ArrowDown className={feedback === 1 ? "is-active" : ""} size={15} />
         </div>
         <button aria-label="Switch camera" onClick={() => restart(facing === "front" ? "back" : "front")}><RotateCw size={21} /></button>
         <button aria-label="Fullscreen" onClick={() => void document.documentElement.requestFullscreen?.().catch(() => {})}><Maximize size={21} /></button>

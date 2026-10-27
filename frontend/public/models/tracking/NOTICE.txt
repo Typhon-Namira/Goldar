@@ -19,3 +19,8 @@ The necklace body worker uses BlazePose Full from the same pinned pose package.
 pose_landmarker_full.task SHA256:
 ddadf631292d2e5f56b5653be6fb6bb4f4452bd159c0e5c60aa4bb29b0874c9a
 Reproduce with scripts/repack-pose-model.py --variant full (weights unchanged).
+
+The shop mirror uses hand_landmarker_fast.task: Full palm detection + Lite hand
+landmarks from @mediapipe/hands@0.4.1675469240; Apache-2.0, weights unchanged.
+SHA256: eb3524b0ac7106c2f3276e8f13213d5e142f4475f5f8c624147ce653d0fcf2e0
+Reproduce with scripts/repack-hand-model.py --variant fast.
