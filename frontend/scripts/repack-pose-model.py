@@ -63,18 +63,19 @@ def main():
     parser.add_argument("--schema-dir", type=Path, required=True)
     parser.add_argument("--source-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--variant", choices=["lite", "full", "heavy"], default="lite")
     args = parser.parse_args()
     schema = load_schema(args.schema_dir, "schema_py_generated.py", "model_schema")
     metadata = load_schema(args.schema_dir, "metadata_schema_py_generated.py", "metadata_schema")
     models = [
         ("pose_detector.tflite", "pose_solution_packed_assets.data", 127.5, 127.5),
-        ("pose_landmarks_detector.tflite", "pose_landmark_lite.tflite", 0, 255),
+        ("pose_landmarks_detector.tflite", f"pose_landmark_{args.variant}.tflite", 0, 255),
     ]
     with zipfile.ZipFile(args.output, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, filename, mean, std in models:
             entry = zipfile.ZipInfo(name, (2023, 1, 1, 0, 0, 0))
             entry.external_attr = 0o644 << 16
-            archive.writestr(entry, annotate((args.source_dir / filename).read_bytes(), schema, metadata, mean, std))
+            archive.writestr(entry, annotate((args.source_dir / filename).read_bytes(), schema, metadata, mean, std, name=f"MediaPipe BlazePose {args.variant.title()}"))
     print("SHA256:", hashlib.sha256(args.output.read_bytes()).hexdigest())
 
 

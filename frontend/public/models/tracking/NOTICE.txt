@@ -14,3 +14,8 @@ Source: @mediapipe/hands@0.4.1675469240 (Google; Apache-2.0).
 Palm detector and hand landmark model repackaged with input normalization
 metadata; model weights unchanged. See LICENSE.txt and the repository's
 THIRD_PARTY_FACE_ENGINE.md for deterministic reproduction.
+
+The necklace body worker uses BlazePose Full from the same pinned pose package.
+pose_landmarker_full.task SHA256:
+ddadf631292d2e5f56b5653be6fb6bb4f4452bd159c0e5c60aa4bb29b0874c9a
+Reproduce with scripts/repack-pose-model.py --variant full (weights unchanged).

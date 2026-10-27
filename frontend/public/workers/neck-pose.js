@@ -11,7 +11,7 @@ self.onmessage = async ({ data }) => {
       );
       tracker = await exports.PoseLandmarker.createFromOptions(files, {
         baseOptions: {
-          modelAssetPath: "/models/tracking/pose_landmarker_lite.task",
+          modelAssetPath: "/models/tracking/pose_landmarker_full.task",
           delegate: "CPU",
         },
         canvas: new OffscreenCanvas(384, 384),
@@ -30,7 +30,7 @@ self.onmessage = async ({ data }) => {
         canvas: new OffscreenCanvas(384, 384),
         runningMode: "VIDEO",
         outputCategoryMask: true,
-        outputConfidenceMasks: false,
+        outputConfidenceMasks: true,
       });
       self.postMessage({ type: "ready" });
     } catch (error) {
@@ -57,6 +57,7 @@ self.onmessage = async ({ data }) => {
               height: mask.height,
               values: mask.getAsUint8Array(),
               category: true,
+              confidence: result.confidenceMasks?.[0]?.getAsFloat32Array(),
             }
           : null;
         const neck = self.findNeckContour(

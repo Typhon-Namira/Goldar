@@ -22,14 +22,27 @@ export class StableNeckFrame {
       const angle = this.value.rotation.angleTo(target.rotation);
       if (angle > 0.012)
         this.value.rotation.slerp(target.rotation, alpha * (1 - 0.012 / angle));
-      if (Math.abs(this.value.mm - target.mm) / target.mm > 0.004)
-        this.value.mm = MathUtils.lerp(this.value.mm, target.mm, alpha);
+      // Stabilize projected contact dimensions jointly with scale. Filtering
+      // radius and mm independently makes the skin boundary breathe when the
+      // shoulder estimator changes scale even though the measured neck is fixed.
+      const radius = this.value.radius * this.value.mm;
+      const height = this.value.height * this.value.mm;
+      const scaleChange = Math.abs(this.value.mm - target.mm) / target.mm;
+      if (scaleChange > 0.004)
+        this.value.mm = MathUtils.lerp(
+          this.value.mm,
+          target.mm,
+          1 - Math.exp(-dt / (scaleChange > 0.12 ? 0.065 : 0.22)),
+        );
       const adapt = (a: number, b: number, threshold: number) =>
         Math.abs(a - b) > threshold
           ? MathUtils.lerp(a, b, 1 - Math.exp(-dt / 0.2))
           : a;
-      this.value.radius = adapt(this.value.radius, target.radius, 0.5);
-      this.value.height = adapt(this.value.height, target.height, 1);
+      this.value.radius =
+        adapt(radius, target.radius * target.mm, 0.5 * target.mm) /
+        this.value.mm;
+      this.value.height =
+        adapt(height, target.height * target.mm, target.mm) / this.value.mm;
       this.value.time = target.time;
     }
     this.time = now;

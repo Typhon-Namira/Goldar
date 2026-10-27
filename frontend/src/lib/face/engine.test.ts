@@ -126,7 +126,7 @@ describe("jewelry engine lifecycle", () => {
     }});
     const points=Array.from({length:33},()=>({x:.5,y:.35,z:0,visibility:1}));
     points[11]={x:.7,y:.6,z:0,visibility:1};points[12]={x:.3,y:.6,z:0,visibility:1};
-    hooks.pose!({points,width:640,height:480,time:performance.now(),neck:null});
+    hooks.pose!({points,width:640,height:480,time:performance.now(),neck:null,reference:{chinX:.5,chinY:.51}});
     module.onUpdate!();
     expect(scene.getObjectByName("GoldarBodyNecklace")!.visible).toBe(true);
   });
@@ -138,7 +138,7 @@ describe("jewelry engine lifecycle", () => {
     }});
     const points=Array.from({length:33},()=>({x:.5,y:.35,z:0,visibility:1}));
     points[11]={x:.7,y:.6,z:0,visibility:1};points[12]={x:.3,y:.6,z:0,visibility:1};
-    hooks.pose!({points,width:640,height:480,time:0,neck:null});
+    hooks.pose!({points,width:640,height:480,time:0,neck:null,reference:{chinX:.5,chinY:.51}});
     await vi.advanceTimersByTimeAsync(700);
     hooks.pose!({points,width:640,height:480,time:200,neck:{left:.44,right:.56,y:.5}});
     await vi.advanceTimersByTimeAsync(400);module.onUpdate!();

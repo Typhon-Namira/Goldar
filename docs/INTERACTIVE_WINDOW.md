@@ -93,3 +93,10 @@ stream, a collar contact about 26mm below the tracked chin and 12/12 visible
 necklace samples after acquisition. A separate delayed-download check verified
 two rapid selection intents. These are reproducible browser/geometry checks,
 not proof of anatomical accuracy or responsiveness on every physical webcam.
+
+
+Necklace body inference uses the locally hosted BlazePose Full bundle (roughly
+9 MB on first use), with a robust multi-row foreground-confidence neck fit and
+capture-aligned chin references. This increases client CPU/model download cost;
+it adds no EC2 inference requirement. Setup and limitations are documented in
+FACE_ATELIER.md under “Necklace measurement refinement”.

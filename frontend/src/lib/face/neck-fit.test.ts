@@ -92,11 +92,12 @@ describe("learned neck silhouette extraction", () => {
     h: number,
     person: {
       values: Uint8Array;
+      confidence?: Float32Array;
       width: number;
       height: number;
       category: boolean;
     } | null,
-    region?: { chinY: number },
+    region?: { chinX?: number; chinY: number },
   ) => { left: number; right: number; y: number } | null;
   it("keeps the full neck silhouette despite a dark strip inside the skin", () => {
     const p = pose().points;
@@ -154,8 +155,14 @@ describe("learned neck silhouette extraction", () => {
     const values = new Uint8Array(10000).fill(255);
     for (let y = 30; y < 58; y++)
       for (let x = 42; x <= 58; x++) values[y * 100 + x] = 0;
-    const result = extract(p, new Uint8ClampedArray(), 200, 100,
-      { values, width: 100, height: 100, category: true }, { chinY: 0.4 })!;
+    const result = extract(
+      p,
+      new Uint8ClampedArray(),
+      200,
+      100,
+      { values, width: 100, height: 100, category: true },
+      { chinY: 0.4 },
+    )!;
     // The input is 2:1, so the shoulder-relative margin is .064, not .032.
     expect(result.y).toBeGreaterThanOrEqual(0.464);
   });
@@ -218,5 +225,57 @@ describe("video reference mapping", () => {
     );
     expect(point.x).toBeCloseTo(0.4625, 8);
     expect(point.y).toBeCloseTo(0.45, 8);
+  });
+});
+
+describe("multi-row confidence contour", () => {
+  const context: { self: Record<string, unknown> } = { self: {} };
+  runInNewContext(
+    readFileSync(
+      new URL("../../../public/workers/neck-contour.js", import.meta.url),
+      "utf8",
+    ),
+    context,
+  );
+  const extract = context.self.findNeckContour as (...args: any[]) => any;
+  function measurement(outlier = false, shift = 0) {
+    const p = pose().points;
+    p[0].y = 0.25;
+    p[9].y = p[10].y = 0.35;
+    const values = new Uint8Array(10000).fill(255),
+      confidence = new Float32Array(10000);
+    for (let y = 36; y < 58; y++)
+      for (let x = 0; x < 100; x++) {
+        const l = 42 + shift,
+          r = 58 + shift;
+        let value =
+          x === l - 1 ? 0.2 : x === r + 1 ? 0.4 : x >= l && x <= r ? 0.8 : 0;
+        if (outlier && y === 40 && x >= 36 + shift && x <= 64 + shift)
+          value = 0.8;
+        confidence[y * 100 + x] = value;
+        if (value >= 0.5) values[y * 100 + x] = 0;
+      }
+    return extract(
+      p,
+      null,
+      100,
+      100,
+      { values, confidence, width: 100, height: 100, category: true },
+      { chinX: 0.5 + shift / 100, chinY: 0.35 },
+    );
+  }
+  it("fits subpixel probability boundaries rather than category-mask stair steps", () => {
+    const result = measurement();
+    expect(result.left).toBeCloseTo(0.42, 5);
+    expect(result.right).toBeCloseTo(0.5925, 5);
+  });
+  it("rejects an isolated jagged row without changing the collar width", () => {
+    expect(measurement(true).left).toBeCloseTo(measurement().left, 5);
+    expect(measurement(true).right).toBeCloseTo(measurement().right, 5);
+  });
+  it("finds a leaning neck even when the shoulder-midpoint seed is outside it", () => {
+    const result = measurement(false, 20);
+    expect(result.left).toBeCloseTo(0.62, 5);
+    expect(result.right).toBeCloseTo(0.7925, 5);
   });
 });

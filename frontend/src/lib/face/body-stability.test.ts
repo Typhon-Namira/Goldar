@@ -37,3 +37,23 @@ describe("render-frame body stabilization", () => {
     expect(filter.update(next, 220, true).position.x).toBe(-0.1);
   });
 });
+
+it("does not make the measured skin boundary breathe when only shoulder scale is noisy", () => {
+  const filter = new StableNeckFrame();
+  filter.update(frame(), 0);
+  const scales: number[] = [];
+  for (let i = 1; i <= 180; i++) {
+    const target = frame(),
+      noise = i % 2 === 0 ? 1.08 : 0.92;
+    target.mm *= noise;
+    target.radius /= noise;
+    target.height /= noise;
+    const result = filter.update(target, i * 16);
+    expect(result.radius * result.mm).toBeCloseTo(0.048, 10);
+    expect(result.height * result.mm).toBeCloseTo(0.09, 10);
+    if (i > 20) scales.push(result.mm);
+  }
+  expect((Math.max(...scales) - Math.min(...scales)) / 0.001).toBeLessThan(
+    0.015,
+  );
+});

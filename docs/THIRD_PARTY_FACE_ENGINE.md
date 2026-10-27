@@ -86,3 +86,21 @@ python scripts/repack-hand-model.py --source-dir /path/to/package \
 
 SHA256: `c42df3382c16edddf9f2ee8e1f6ca7c4f2f060fe3fd783d7b38915e74787125b`.
 The existing `/models/tracking/LICENSE.txt` supplies Apache-2.0 terms.
+
+The necklace worker now uses `pose_landmarker_full.task`, repackaged from
+`pose_landmark_full.tflite` in the same pinned Apache-2.0 pose package. This
+replaces Lite for body inference; it does not change face or hand inference.
+Detector and landmark tensor buffers are verified byte-for-byte by the repacker.
+Reproduce with the schema files above (flatbuffers 25.12.19, numpy 2.5.4):
+
+```bash
+python scripts/repack-pose-model.py --source-dir /path/to/extracted/package \
+  --schema-dir /path/to/tensorflow_lite_support/metadata --variant full \
+  --output public/models/tracking/pose_landmarker_full.task
+```
+
+Full archive SHA256:
+`ddadf631292d2e5f56b5653be6fb6bb4f4452bd159c0e5c60aa4bb29b0874c9a`.
+The checked-in Lite model remains available for reproducibility; production
+necklace tracking requests Full. This adds approximately 9 MB to first-use
+model downloads and increases client CPU inference cost, not server inference.

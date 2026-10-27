@@ -24,7 +24,7 @@ copy the SDK, chunks and models to ignored `public/vendor/8thwall`. These assets
 must be deployed with the frontend; no third-party camera service or API key is
 needed. Inference uses browser WebAssembly/WebGL. No frames are uploaded by this
 integration, and NEXT_PUBLIC_WILOR_API_URL is no longer read. Necklaces also
-load same-origin MediaPipe WASM plus the checked-in Pose Lite model archive;
+load same-origin MediaPipe WASM plus the checked-in BlazePose Full model archive;
 see THIRD_PARTY_FACE_ENGINE.md for Apache licensing and model provenance.
 
 ## Model preparation and dashboard
@@ -101,7 +101,7 @@ they are not a representation of a merchant's actual jewelry.
   arbitrary merchant geometry is not automatically skinned or simulated.
   A missing/low-confidence shoulder hides the preview after a short timeout
   and asks the user to frame both shoulders instead of reverting to chin fit.
-  Pose inference runs on CPU inside a dedicated worker, at most one 384px
+  Pose inference runs on CPU inside a dedicated worker, at most one 640px
   frame in flight, using the existing camera stream; it never blocks the
   camera/render loop or uploads images. Worker/model assets are self-hosted.
   The first pose may take several seconds. On unsupported devices, a clear
@@ -163,7 +163,7 @@ A detected face, visible necklace scene and stop/restart are checked. Earring
 preview is exercised using the real engine with tracked earlobe anchors,
 including stop/restart.
 Dashboard save is tested in Chromium through the actual cross-origin API.
-The automated suite contains 94 frontend tests and 6 isolated HTTP/API tests,
+The automated suite contains 103 frontend tests and 6 isolated HTTP/API tests,
 including the PUT CORS preflight needed by the dashboard.
 
 Physical iOS Safari and Android Chrome still require validation: permission
@@ -225,3 +225,40 @@ same body remains tracked, with explicit new-face/dimension/body-gap reset and
 median silhouette filtering. The body fit stays on a fixed camera plane;
 frontal chin bounds keep the collar within 20–65mm below the chin. These changes
 supersede the earlier fallback and contour-expiry audit notes above.
+
+### Necklace measurement refinement
+
+Body inference uses the local BlazePose Full bundle, on the existing worker,
+with at most one camera bitmap in flight. Body input retains up to 640 pixels
+on its longest edge rather than 384. Segmentation remains every third body
+observation, with borrowed foreground confidence arrays consumed synchronously
+inside the segmenter callback; neither masks nor images are uploaded.
+
+The neck is now a robust two-boundary fit over adjacent upper-neck rows.
+The .5 probability crossing is interpolated between mask pixels. Median pairwise
+slopes and median residuals suppress isolated silhouette spikes, and implausible
+or heavily obscured bands are rejected rather than treated as chest contact.
+The seed follows the observed chin horizontally, so leaning away from the
+shoulder midpoint does not seed the background. Category-only masks remain
+supported by the extractor for regression fixtures.
+
+Captured chin coordinates travel with the corresponding body frame. Measured
+neck proportions retain both chin-relative and shoulder-relative profiles;
+raising a shoulder during a segmentation gap cannot drag the collar down.
+The shoulder fallback is rebased from the latest chin-relative fit to prevent
+a discontinuity when the face temporarily disappears. Bootstrap remains an
+explicit estimate, now with bounded horizontal alignment beneath the chin.
+The measured surface continues to drive both chain routing and depth occlusion.
+
+This is monocular inferred geometry, not a depth scan. Hair, high collars, very
+oblique poses, and unrigged merchant GLBs still limit contact accuracy. The Full
+model and numerical regression tests do not prove millimetre accuracy on a live
+shop webcam. Validate frontal/leaning/turning poses on that camera before use.
+
+Bootstrap continuity is stored separately from measured anatomy and remains
+labelled estimated; it bridges a short face gap only while the shoulders stay
+valid. A fresh chin reference (within 650 ms at capture) is required to seed a
+new bootstrap. Radius/height stabilization now operates on projected contact
+dimensions jointly with scale, so independent shoulder-scale noise does not
+inflate/deflate the depth surface. Small scale changes use slower smoothing;
+large approach/retreat movements retain a faster response.

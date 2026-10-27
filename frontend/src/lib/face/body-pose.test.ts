@@ -74,3 +74,16 @@ it('discards an in-flight observation belonging to the previous visitor after pr
  worker.send({type:'pose',points:[],neck:null,time:220});
  expect(result).toHaveBeenCalledTimes(1);tracker.dispose();
 });
+
+it('keeps the chin reference from image capture rather than sampling it after delayed bitmap decoding',async()=>{
+ let resolve!: (bitmap: unknown)=>void;
+ vi.stubGlobal('createImageBitmap',vi.fn(()=>new Promise(done=>{resolve=done;})));
+ let chin={chinX:.48,chinY:.4};const result=vi.fn();
+ const tracker=new BodyPoseTracker(result,vi.fn(),()=>chin);tracker.start(video());
+ const worker=WorkerStub.current;worker.send({type:'ready'});
+ await vi.advanceTimersByTimeAsync(110);
+ chin={chinX:.6,chinY:.5};resolve({close:vi.fn()});await vi.advanceTimersByTimeAsync(0);
+ const frame=worker.postMessage.mock.calls[1][0];expect(frame.region).toEqual({chinX:.48,chinY:.4});
+ worker.send({type:'pose',points:[],neck:null,time:110});
+ expect(result.mock.calls[0][0].reference).toEqual(frame.region);tracker.dispose();
+});

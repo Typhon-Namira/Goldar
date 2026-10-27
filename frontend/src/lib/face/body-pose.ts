@@ -8,6 +8,7 @@ export type BodyPoint = {
 export type BodyPose = {
   points: BodyPoint[];
   neck?: { left: number; right: number; y: number } | null;
+  reference?: { chinX?: number; chinY: number } | null;
   time: number;
   width: number;
   height: number;
@@ -26,6 +27,7 @@ export class BodyPoseTracker {
   private video: HTMLVideoElement | null = null;
   private previousVideoTime = -1;
   private deadline: ReturnType<typeof setTimeout> | null = null;
+  private capturedReference: BodyPose["reference"] = null;
   private dimensions = { width: 0, height: 0 };
   constructor(
     private result: (pose: BodyPose) => void,
@@ -33,7 +35,7 @@ export class BodyPoseTracker {
     private reference?: (
       width: number,
       height: number,
-    ) => { chinY: number } | null,
+    ) => { chinX?: number; chinY: number } | null,
   ) {}
   start(video: HTMLVideoElement) {
     this.video = video;
@@ -59,6 +61,7 @@ export class BodyPoseTracker {
           this.profile.apply({
             points: data.points,
             neck: data.neck,
+            reference: this.capturedReference,
             time: data.time,
             ...this.dimensions,
           }),
@@ -75,7 +78,10 @@ export class BodyPoseTracker {
     );
     this.timer = setInterval(() => void this.capture(), 110);
   }
-  resetProfile() { this.profile = new NeckProfileMemory(); this.generation++; }
+  resetProfile() {
+    this.profile = new NeckProfileMemory();
+    this.generation++;
+  }
   private fail(message: string) {
     this.dispose();
     this.failed(message);
@@ -96,18 +102,20 @@ export class BodyPoseTracker {
     this.previousVideoTime = video.currentTime;
     this.dimensions = { width: video.videoWidth, height: video.videoHeight };
     const capturedAt = performance.now();
+    this.capturedReference =
+      this.reference?.(video.videoWidth, video.videoHeight) ?? null;
     const generation = this.generation;
     this.frameGeneration = generation;
     let frame: ImageBitmap | undefined;
     try {
       const scale = Math.min(
         1,
-        384 / Math.max(video.videoWidth, video.videoHeight),
+        640 / Math.max(video.videoWidth, video.videoHeight),
       );
       frame = await createImageBitmap(video, {
         resizeWidth: Math.round(video.videoWidth * scale),
         resizeHeight: Math.round(video.videoHeight * scale),
-        resizeQuality: "low",
+        resizeQuality: "high",
       });
       if (this.disposed || generation !== this.generation) {
         frame.close();
@@ -123,7 +131,7 @@ export class BodyPoseTracker {
           type: "frame",
           frame,
           time: capturedAt,
-          region: this.reference?.(video.videoWidth, video.videoHeight) ?? null,
+          region: this.capturedReference,
         },
         [frame],
       );

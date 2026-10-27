@@ -2,10 +2,11 @@ import type { SwipeDirection } from "../kiosk/swipe";
 import { HandSwipeTracker } from "../kiosk/hand-tracker";
 import { estimatedNeck } from "./neck-observation";
 import { NecklaceRig } from "./necklace-rig";
+import { NeckProfileMemory } from "./neck-profile";
 import { neckSurface } from "./neck-surface";
 import { StableNeckFrame } from "./body-stability";
 import { BodyPoseTracker } from "./body-pose";
-import { fitNeck, videoPoint, type NeckFit } from "./neck-fit";
+import { cameraPoint, fitNeck, videoPoint, type NeckFit } from "./neck-fit";
 import { createNeckOccluder, updateNeckOccluder } from "./neck-occlusion";
 import { LobeStabilizer } from "./stabilization";
 import { LobeSurface } from "./ear-occlusion";
@@ -77,6 +78,7 @@ export class FaceEngine {
   private neckDepth: ReturnType<typeof createNeckOccluder> | null = null;
   private necklaceRig: NecklaceRig | null = null;
   private materialsReady = false;
+  private bootstrapProfile = new NeckProfileMemory();
   private faceChin: T.Vector3 | null = null;
   private bodyFaceId: number | null = null;
   private neckRoot = new T.Group();
@@ -161,12 +163,16 @@ export class FaceEngine {
           if (this.product.category !== "necklace" || !this.sceneCamera) return;
           this.neckEstimated = !pose.neck;
           if (!pose.neck) {
-            const chin = this.faceChin && performance.now() - this.lastSeen < 1000
-              ? videoPoint(this.faceChin, pose, {width:this.canvas.width,height:this.canvas.height}, this.sceneCamera, this.facing === "front").y
-              : undefined;
+            // Use the face observation captured with this body frame. Mixing
+            // a newer face with an older pose shifts contact during movement.
+            const chin = pose.reference?.chinY;
             const neck = estimatedNeck(pose, chin);
-            if (!neck) return;
-            pose = {...pose,neck};
+            // Keep bootstrap continuity separately from measured anatomy;
+            // short face/segmentation gaps must not blink a valid body fit.
+            if (!neck && performance.now() - this.lastSeen > 1200) return;
+            const fallback = this.bootstrapProfile.apply({...pose,neck});
+            if (!fallback.neck) return;
+            pose = fallback;
           }
           const camera = this.sceneCamera;
           // Body fitting is projective. A fixed camera plane avoids scale/pose
@@ -188,10 +194,14 @@ export class FaceEngine {
               new T.Vector3(0, 0, -1)
                 .applyQuaternion(this.root.quaternion)
                 .dot(view) > 0.9;
-            if (this.faceChin && frontal && performance.now() - this.lastSeen < 1000) {
+            if (pose.reference && frontal) {
               const bounded = fitNeck(
                 pose, {width: this.canvas.width, height: this.canvas.height},
-                camera, depth, this.facing === "front", this.faceChin,
+                camera, depth, this.facing === "front", cameraPoint(
+                  {x:pose.reference.chinX ?? .5,y:pose.reference.chinY,z:0},
+                  pose,{width:this.canvas.width,height:this.canvas.height},
+                  camera,depth,this.facing === "front",
+                ),
               );
               if (bounded) fit = bounded;
             }
@@ -212,7 +222,7 @@ export class FaceEngine {
           if (
             !this.faceChin ||
             !this.sceneCamera ||
-            performance.now() - this.lastSeen > 1000
+            performance.now() - this.lastSeen > 650
           )
             return null;
           const point = videoPoint(
@@ -222,7 +232,8 @@ export class FaceEngine {
             this.sceneCamera,
             this.facing === "front",
           );
-          return point.y > 0 && point.y < 1 ? { chinY: point.y } : null;
+          return point.y > 0 && point.y < 1 && point.x > 0 && point.x < 1
+            ? { chinX: point.x, chinY: point.y } : null;
         },
       );
     }
@@ -459,6 +470,7 @@ export class FaceEngine {
     }
     if (this.bodyFaceId !== null && this.bodyFaceId !== face.id) {
       this.body?.resetProfile();
+      this.bootstrapProfile = new NeckProfileMemory();
       // XR8 can reacquire a face under a new ID while body tracking never
       // stopped. Clear anatomy, but bridge that one in-flight body frame.
       if (performance.now() - this.neckReceived > 300) {
