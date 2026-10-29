@@ -34,7 +34,7 @@ export class FaceQualityTracker {
     return (
       !!this.result &&
       this.result.id === id &&
-      now - this.result.time < 500 &&
+      now - this.result.time < 900 &&
       this.result.usable
     );
   }
@@ -48,7 +48,7 @@ export class FaceQualityTracker {
       v.readyState < 2 ||
       !v.videoWidth ||
       !v.videoHeight ||
-      now - this.captured < 160 ||
+      now - this.captured < 500 ||
       b.x < 0 ||
       b.y < 0 ||
       b.x + b.width > 1 ||

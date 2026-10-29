@@ -11,7 +11,7 @@ camera is involved. Standalone product previews `/ar/{id}` keep their prior view
 Eligibility uses the unzoomed source video: face width at least 80 pixels,
 height at least 96 pixels, a fully visible face, acceptable facing angle and
 about 650 ms of stable observations (at least five). A tiny 96x96 face crop is
-sampled at most once per 160 ms in a separate bounded worker. Laplacian variance
+sampled at most once per 500 ms during acquisition only in a separate bounded worker. Laplacian variance
 and exposure/clipping checks are quality proxies, not a guarantee of optical
 resolution. Only a fresh result for the same anonymous ID can enable entry.
 Failure of this optional worker leaves the original wide camera view available.
@@ -33,7 +33,10 @@ rejected. This is anonymous visual tracking, not biometric identity assurance.
 Neck profiles, bootstrap anatomy and body stabilization reset at visitor entry
 and exit, even if the SDK reuses an ID. Body updates must geometrically match
 the active face; hand navigation is limited to the active visitor's region.
-This gate operates on raw video coordinates, preserving vertical swipe direction
+Before acquisition, normal necklace fitting and hand navigation remain available;
+image quality never blocks either feature. Face projection for framing is limited
+to 10 Hz and quality crops stop entirely during a locked visit. The ownership
+gate operates on raw video coordinates, preserving vertical swipe direction
 regardless of zoom or selfie mirroring. Operator keyboard/card fallbacks remain.
 
 ## Rendering and lifecycle

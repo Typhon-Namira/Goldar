@@ -40,7 +40,7 @@ it("captures a bounded raw face crop, never queues several images, and rejects s
   WorkerStub.current.send({ type: "quality", id: 1, time: 200, usable: true });
   expect(tracker.usable(1, 400)).toBe(true);
   expect(tracker.usable(2, 400)).toBe(false);
-  expect(tracker.usable(1, 800)).toBe(false);
+  expect(tracker.usable(1, 1200)).toBe(false);
   tracker.dispose();
   expect(WorkerStub.current.terminate).toHaveBeenCalledTimes(1);
 });
@@ -108,11 +108,12 @@ it("does not let a failed transfer timer disable a recovered quality stream", as
   });
   tracker.sample(1, bounds, 200);
   await Promise.resolve();
-  tracker.sample(1, bounds, 400);
+  tracker.sample(1, bounds, 750);
   await Promise.resolve();
-  WorkerStub.current.send({ type: "quality", id: 1, time: 400, usable: true });
+  expect(WorkerStub.current.postMessage).toHaveBeenCalledTimes(2);
+  WorkerStub.current.send({ type: "quality", id: 1, time: 750, usable: true });
   await vi.advanceTimersByTimeAsync(4100);
   expect(failed).not.toHaveBeenCalled();
-  expect(tracker.usable(1, 600)).toBe(true);
+  expect(tracker.usable(1, 900)).toBe(true);
   tracker.dispose();
 });

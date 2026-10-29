@@ -4,8 +4,8 @@ import type { Product } from "../api";
 import type { BodyPose } from "./body-pose";
 import type { PipelineModule, FaceData } from "./types";
 import { FaceEngine } from "./engine";
-vi.mock("../kiosk/face-quality",()=>({FaceQualityTracker:class {constructor(failed:()=>void){hooks.qualityFailed=failed;} start(){} sample(){} usable(){return true;} dispose(){}}}));
-const hooks = vi.hoisted(() => ({ qualityFailed:null as null|(()=>void), pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn(), profileReset: vi.fn(), block: null as Promise<void> | null }));
+vi.mock("../kiosk/face-quality",()=>({FaceQualityTracker:class {constructor(failed:()=>void){hooks.qualityFailed=failed;} start(){} sample=hooks.qualitySample; usable(){return hooks.qualityUsable;} dispose(){}}}));
+const hooks = vi.hoisted(() => ({ qualitySample:vi.fn(), qualityUsable:true, qualityFailed:null as null|(()=>void), pose: null as null | ((pose: BodyPose) => void), bodyDisposed: vi.fn(), profileReset: vi.fn(), block: null as Promise<void> | null }));
 vi.mock("./body-pose", () => ({ BodyPoseTracker: class {
   constructor(result: (pose: BodyPose) => void) { hooks.pose = result; }
   start() {}
@@ -27,7 +27,7 @@ vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({ GLTFLoader: class {
 let engine: FaceEngine | undefined;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
-  hooks.profileReset.mockClear();
+  hooks.profileReset.mockClear();hooks.qualitySample.mockClear();hooks.qualityUsable=true;
   hooks.bodyDisposed.mockClear(); hooks.pose = null; hooks.block = null;
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
@@ -211,6 +211,9 @@ describe("jewelry engine lifecycle", () => {
     expect(canvas.style.transform).toContain('matrix(');expect(canvas.style.transform).not.toContain('NaN');
     const root=scene.getObjectByName('GoldarFaceJewelry')!;
     expect(hooks.profileReset).toHaveBeenCalledTimes(1);
+    const samples=hooks.qualitySample.mock.calls.length;
+    for(let i=0;i<8;i++){emit('faceupdated',face(1));await vi.advanceTimersByTimeAsync(100);}
+    expect(hooks.qualitySample).toHaveBeenCalledTimes(samples);
     emit('facelost',{id:1});const other=face(2);other.transform.position.x=.1;emit('faceupdated',other);
     expect(root.visible).toBe(false);expect(root.position.x).toBe(0);
     await vi.advanceTimersByTimeAsync(1400);module.onUpdate!();emit('faceupdated',other);expect(root.position.x).toBe(0);expect(hooks.profileReset).toHaveBeenCalledTimes(2);
@@ -218,6 +221,15 @@ describe("jewelry engine lifecycle", () => {
     expect(canvas.style.transform).toBe('matrix(1,0,0,1,0,0)');
     await vi.advanceTimersByTimeAsync(350);emit('faceupdated',other);expect(root.position.x).toBe(.1);
     expect(camera.projectionMatrix.toArray()).toEqual(projection);expect(camera.position.toArray()).toEqual(position);
+  });
+
+  it("keeps necklace fitting active while image quality prevents automatic zoom",async()=>{
+    const {scene,module}=await start("necklace",{autoFrame:true});
+    hooks.qualityUsable=false;
+    const points=Array.from({length:33},()=>({x:.5,y:.6,z:0,visibility:1}));points[11].x=.7;points[12].x=.3;
+    hooks.pose!({points,neck:{left:.44,right:.56,y:.5},time:performance.now(),width:640,height:480});
+    module.onUpdate!();
+    expect(scene.getObjectByName('GoldarBodyNecklace')!.visible).toBe(true);
   });
 
   it("falls back to normal live fitting if optional framing quality is unavailable",async()=>{

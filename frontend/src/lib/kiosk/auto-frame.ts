@@ -255,7 +255,7 @@ export class AutoFramer {
       this.state !== "focused" ||
       this.owner === null ||
       !this.latest ||
-      now - this.lastSeen > 650
+      now - this.lastSeen > 1200
     )
       return false;
     const b = this.latest.source,
@@ -272,7 +272,7 @@ export class AutoFramer {
     right: { x: number; y: number },
     now: number,
   ) {
-    if (this.state !== "focused" || !this.latest || now - this.lastSeen > 650)
+    if (this.state !== "focused" || !this.latest || now - this.lastSeen > 1200)
       return false;
     const b = this.latest.source,
       c = centre(b),
@@ -281,7 +281,7 @@ export class AutoFramer {
     return (
       Math.abs(c.x - (left.x + right.x) / 2) <= Math.max(0.06, span * 0.4) &&
       c.y < cy &&
-      cy - c.y < b.height * 3.5
+      cy - c.y < b.height * 5
     );
   }
   reset() {
